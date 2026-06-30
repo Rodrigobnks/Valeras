@@ -2680,34 +2680,38 @@ def mostrar_comentarios_ia(
     if str(busqueda_actual_ia).strip():
         filtro_resumen_ia += f" Búsqueda aplicada: <b>{busqueda_actual_ia}</b>."
 
+    busqueda_texto_ia = ""
+    if str(busqueda_actual_ia).strip():
+        busqueda_texto_ia = f" La búsqueda activa es <b>{busqueda_actual_ia}</b>."
+
     if calidad >= 70:
-        lectura_calidad = "La calidad de cartera se mantiene en un nivel sólido; el foco debe ser conservar la disciplina operativa y proteger las zonas con mayor base al corriente."
+        lectura_calidad = "La calidad de cartera se mantiene en un rango sólido; el objetivo debe ser sostener la disciplina operativa y proteger las zonas que explican la mayor base al corriente."
     elif calidad >= 55:
-        lectura_calidad = "La calidad de cartera se ubica en un rango intermedio; hay una base relevante al corriente, pero todavía existe presión por mora que debe gestionarse por zona y sucursal."
+        lectura_calidad = "La calidad de cartera se ubica en un rango intermedio; existe una base relevante al corriente, aunque la mora todavía presiona el desempeño y requiere gestión puntual por zona y sucursal."
     else:
-        lectura_calidad = "La calidad de cartera está en un nivel de atención; conviene priorizar recuperación, seguimiento a sucursales críticas y contención de deterioro operativo."
+        lectura_calidad = "La calidad de cartera se encuentra en zona de atención; la prioridad debe centrarse en recuperación, seguimiento a sucursales críticas y contención del deterioro operativo."
 
     if canjes_dia > 0:
         lectura_corte = (
-            f"En la fecha de corte se registraron <b>{formato_numero(canjes_dia)}</b> canjes "
+            f"En el día de corte se registraron <b>{formato_numero(canjes_dia)}</b> canjes "
             f"por <b>{formato_moneda(dispersado_dia)}</b>, con un canje promedio del día de "
             f"<b>{formato_moneda(canje_promedio_dia)}</b>."
         )
     else:
-        lectura_corte = "En la fecha de corte no se observan canjes registrados; valida si la operación del día ya fue cargada en la base de dispersión."
+        lectura_corte = "En el día de corte no se observan canjes registrados; conviene validar si la operación diaria ya fue cargada en la base de dispersión."
 
     if var_corriente > 0:
-        lectura_var = "La variación de distribuidoras al corriente es positiva; la señal operativa del corte es favorable."
+        lectura_var = "La variación de distribuidoras al corriente es positiva, por lo que la señal operativa del corte es favorable."
         tono_var = "Mejora operativa"
-        prioridad_ia = "Prioridad sugerida: identificar las sucursales que explican la mejora al corriente y replicar sus prácticas en zonas con menor calidad o menor productividad del corte."
+        prioridad_ia = "Prioridad sugerida: identificar las sucursales que explican la mejora al corriente y replicar esas prácticas en zonas con menor calidad o menor productividad del corte."
     elif var_corriente < 0:
-        lectura_var = "La variación de distribuidoras al corriente es negativa; conviene revisar las zonas o sucursales con mayor deterioro."
+        lectura_var = "La variación de distribuidoras al corriente es negativa, por lo que conviene revisar las zonas o sucursales con mayor deterioro."
         tono_var = "Atención requerida"
-        prioridad_ia = "Prioridad sugerida: revisar las sucursales con caída en distribuidoras al corriente, contrastarlas contra canjes del día y enfocar seguimiento donde coincidan baja calidad y alta mora."
+        prioridad_ia = "Prioridad sugerida: revisar las sucursales con caída en distribuidoras al corriente, contrastarlas contra los canjes del día y enfocar el seguimiento donde coincidan baja calidad y alta mora."
     else:
-        lectura_var = "La variación de distribuidoras al corriente está estable; el foco debe estar en sostener la base al corriente."
+        lectura_var = "La variación de distribuidoras al corriente se mantiene estable; el foco debe ser sostener la base al corriente."
         tono_var = "Estabilidad"
-        prioridad_ia = "Prioridad sugerida: mantener vigilancia sobre calidad y dispersión, porque el movimiento al corriente está estable y el siguiente foco debe ser mejorar conversión por sucursal."
+        prioridad_ia = "Prioridad sugerida: mantener vigilancia sobre calidad y dispersión; con el movimiento al corriente estable, el siguiente foco debe ser mejorar la conversión por sucursal."
 
     def resumen_base_por_sucursal() -> pd.DataFrame:
         columnas_necesarias = ["Sucursal"]
@@ -2759,11 +2763,11 @@ def mostrar_comentarios_ia(
         mayor_disp_dia_base = base_sucursal.sort_values("Total_Dispersado_Fecha_Corte", ascending=False).iloc[0]
 
         lectura_base_oculta = (
-            "La lectura de la base completa, aunque no todos los registros estén visibles en pantalla, señala que "
+            "La base completa señala que "
             f"<b>{mayor_mora['Sucursal']}</b> concentra la mayor mora con <b>{formato_numero(mayor_mora['Distribuidoras_en_Mora'])}</b> distribuidoras en mora; "
             f"<b>{mayor_caida['Sucursal']}</b> presenta la mayor caída al corriente con <b>{formato_numero(mayor_caida['Var_Dist_Corriente'])}</b>; "
-            f"y en el día de corte la mayor actividad comercial se observa en <b>{mayor_canjes_dia['Sucursal']}</b> por canjes "
-            f"y <b>{mayor_disp_dia_base['Sucursal']}</b> por dispersado."
+            f"mientras que en el día de corte la mayor actividad comercial se concentra en <b>{mayor_canjes_dia['Sucursal']}</b> por canjes "
+            f"y en <b>{mayor_disp_dia_base['Sucursal']}</b> por dispersión."
         )
     else:
         lectura_base_oculta = "La lectura adicional de base no encontró un nivel de sucursal suficiente para generar alertas complementarias."
@@ -2776,29 +2780,27 @@ def mostrar_comentarios_ia(
 <div class="ai-panel">
     <h3>Comentario IA ejecutivo</h3>
     <p>
-        <b>{nombre_valera}</b> presenta al corte <b>{fecha_sel}</b>. {alcance_contexto}
-        {filtro_resumen_ia}
+        Al corte <b>{fecha_sel}</b>, <b>{nombre_valera}</b> muestra una lectura ejecutiva de la operación seleccionada.
+        {alcance_contexto} El análisis está configurado en <b>{modo_tabla_actual_ia}</b>, con apertura por
+        <b>{nivel_vista}</b> y ordenado por <b>{variable_tamano}</b>.{busqueda_texto_ia}
     </p>
     <p>
-        La selección actual tiene una base de
-        <b>{formato_numero(total_distribuidoras)}</b> distribuidoras. De ellas,
-        <b>{formato_numero(total_corriente)}</b> están al corriente
-        (<b>{pct_corriente:,.2f}%</b>) y <b>{formato_numero(total_mora)}</b> se encuentran en mora
-        (<b>{pct_mora:,.2f}%</b>). {lectura_calidad}
+        La cartera analizada concentra <b>{formato_numero(total_distribuidoras)}</b> distribuidoras:
+        <b>{formato_numero(total_corriente)}</b> al corriente (<b>{pct_corriente:,.2f}%</b>) y
+        <b>{formato_numero(total_mora)}</b> en mora (<b>{pct_mora:,.2f}%</b>). {lectura_calidad}
     </p>
     <p>
-        En términos comerciales, la dispersión acumulada asciende a
-        <b>{formato_moneda(total_dispersado)}</b>, con <b>{formato_numero(total_canjes)}</b>
-        canjes acumulados y un canje promedio acumulado de <b>{formato_moneda(canje_promedio)}</b>.
-        {lectura_corte}
+        En actividad comercial, la dispersión acumulada alcanza <b>{formato_moneda(total_dispersado)}</b>,
+        soportada por <b>{formato_numero(total_canjes)}</b> canjes y un ticket promedio acumulado de
+        <b>{formato_moneda(canje_promedio)}</b>. {lectura_corte}
     </p>
     <p>
-        <b>{tono_var}:</b> {lectura_var} La variación al corriente es de
-        <b>{formato_numero(var_corriente)}</b> y la variación en mora es de
+        <b>{tono_var}:</b> {lectura_var} El movimiento neto al corriente es de
+        <b>{formato_numero(var_corriente)}</b>, frente a una variación en mora de
         <b>{formato_numero(var_mora)}</b>. {prioridad_ia}
     </p>
     <p>
-        <b>Lectura complementaria de base:</b> {lectura_base_oculta}
+        <b>Foco operativo:</b> {lectura_base_oculta}
     </p>
 </div>
 
