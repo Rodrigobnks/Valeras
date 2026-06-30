@@ -1908,6 +1908,50 @@ st.markdown(
     margin-bottom: 5px;
 }}
 
+.map-guide-side {
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.96));
+    border: 1px solid var(--borde);
+    border-left: 7px solid var(--azul);
+    border-radius: 20px;
+    padding: 22px 24px;
+    margin: 0 0 18px 0;
+    box-shadow: 0 14px 34px rgba(12, 33, 74, 0.08);
+}
+
+.map-guide-side h3 {
+    color: var(--azul);
+    font-size: 24px;
+    font-weight: 950;
+    margin: 0 0 12px 0;
+    letter-spacing: -0.2px;
+}
+
+.map-guide-side p {
+    color: var(--texto);
+    font-size: 16px;
+    line-height: 1.55;
+    font-weight: 600;
+    margin: 0 0 14px 0;
+}
+
+.map-guide-side ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.map-guide-side li {
+    color: var(--texto);
+    font-size: 15px;
+    line-height: 1.55;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+
+.map-guide-side b {
+    color: var(--azul);
+    font-weight: 900;
+}
+
 @media (max-width: 900px) {{
     .ai-grid,
     .ai-guide {{
@@ -2565,29 +2609,26 @@ def texto_tipo_mapa(tipo_mapa: str) -> str:
     return "El mapa está coloreando las sucursales por Subdirección, útil para identificar cobertura territorial y concentración operativa."
 
 
-def mostrar_guia_mapa_previa(tipo_mapa: str):
-    """Muestra la explicación del mapa antes de los botones de Tipo de mapa."""
-    st.markdown(
-        f"""
-<div class="ai-panel">
+def html_guia_mapa_previa(tipo_mapa: str) -> str:
+    """Devuelve la guía del mapa en formato ejecutivo para colocarla junto a Tipo de mapa."""
+    return f"""
+<div class="map-guide-side">
     <h3>Cómo interactuar con el mapa</h3>
     <p>{texto_tipo_mapa(tipo_mapa)}</p>
-    <div class="ai-guide">
-        <div class="ai-guide-card">
-            <h4>Mapa</h4>
-            <ul>
-                <li>Pasa el cursor sobre una bolita para ver el detalle de la sucursal, subdirección, zona, calidad, distribuidoras, canjes y dispersión.</li>
-                <li>Usa <b>Subdirección</b> para ver colores por estructura operativa.</li>
-                <li>Usa <b>Calor Canjes</b> para detectar concentración de canjes del día exacto de corte.</li>
-                <li>Usa <b>Calor Dispersado</b> para detectar concentración del importe dispersado en el día exacto de corte.</li>
-                <li>Da clic en un estado para entrar al detalle territorial y vuelve con el botón de regreso.</li>
-            </ul>
-        </div>
-    </div>
+    <ul>
+        <li>Pasa el cursor sobre una bolita para consultar sucursal, subdirección, zona, calidad, distribuidoras, canjes y dispersión.</li>
+        <li>Usa <b>Subdirección</b> para identificar cobertura territorial por estructura operativa.</li>
+        <li>Usa <b>Calor Canjes</b> para detectar concentración de canjes del día exacto de corte.</li>
+        <li>Usa <b>Calor Dispersado</b> para ubicar la concentración del importe dispersado en el día exacto de corte.</li>
+        <li>Da clic en un estado para entrar al detalle territorial y vuelve con el botón de regreso.</li>
+    </ul>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+"""
+
+
+def mostrar_guia_mapa_previa(tipo_mapa: str):
+    """Muestra la explicación del mapa."""
+    st.markdown(html_guia_mapa_previa(tipo_mapa), unsafe_allow_html=True)
 
 
 def mostrar_comentarios_ia(
@@ -2599,6 +2640,8 @@ def mostrar_comentarios_ia(
     nivel_vista: str,
     variable_tamano: str,
     tipo_mapa: str,
+    solo_ejecutivo: bool = False,
+    ocultar_ejecutivo: bool = False,
 ):
     if df_resumen_base.empty:
         return
@@ -2770,6 +2813,13 @@ def mostrar_comentarios_ia(
     </div>
 </div>
 """
+    if solo_ejecutivo:
+        resumen_html = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)[0]
+    elif ocultar_ejecutivo:
+        partes = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)
+        if len(partes) > 1:
+            resumen_html = '<div class="ai-grid">' + partes[1]
+
     st.markdown(resumen_html, unsafe_allow_html=True)
 
 # ======================================================
@@ -3960,18 +4010,35 @@ def mostrar_mapa(valera_param: str):
     nivel_vista = st.session_state["nivel_vista"]
     variable_tamano = st.session_state["variable_tamano"]
 
-    # Guía del mapa antes de los botones de Tipo de mapa.
-    tipo_mapa_actual_para_guia = st.session_state.get("tipo_mapa_valeras", "Subdirección")
-    mostrar_guia_mapa_previa(tipo_mapa_actual_para_guia)
+    # Resumen IA ejecutivo + Tipo de mapa / guía ejecutiva.
+    df_mapa_previo = preparar_mapa_por_nivel(
+        df=df_resumen_base,
+        nivel_vista=nivel_vista,
+        variable_tamano=variable_tamano,
+    )
 
-    col_tipo_mapa, _, _ = st.columns([1, 1, 1])
-    with col_tipo_mapa:
+    cols_ia_tipo_mapa = st.columns([2.2, 1])
+    with cols_ia_tipo_mapa[0]:
+        mostrar_comentarios_ia(
+            df_resumen_base=df_resumen_base,
+            df_mapa=df_mapa_previo,
+            resumen_pais=pd.DataFrame(),
+            nombre_valera=nombre_valera,
+            fecha_sel=fecha_sel,
+            nivel_vista=nivel_vista,
+            variable_tamano=variable_tamano,
+            tipo_mapa=st.session_state.get("tipo_mapa_valeras", "Subdirección"),
+            solo_ejecutivo=True,
+        )
+
+    with cols_ia_tipo_mapa[1]:
         tipo_mapa = selector_botones(
             "Tipo de mapa",
             ["Subdirección", "Calor Canjes", "Calor Dispersado"],
             "tipo_mapa_valeras",
             "Subdirección",
         )
+        st.markdown(html_guia_mapa_previa(tipo_mapa), unsafe_allow_html=True)
 
     # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
     paises_datos = sorted(df_filtrado["País"].dropna().unique().tolist())
@@ -4099,6 +4166,7 @@ def mostrar_mapa(valera_param: str):
         nivel_vista=nivel_vista,
         variable_tamano=variable_tamano,
         tipo_mapa=tipo_mapa,
+        ocultar_ejecutivo=True,
     )
 
     mostrar_tabla_variacion(resumen_pais)
