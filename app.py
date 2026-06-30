@@ -1115,6 +1115,20 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
             df[col] = 0
         df[col] = convertir_numero(df[col]).fillna(0)
 
+    # Calidad de Cartera se recalcula a nivel fila para que después,
+    # al elegir Subdirección / Zona / Sucursal, la tabla muestre el promedio
+    # real de la calidad dentro del nivel de estructura seleccionado.
+    df["Calidad de Cartera"] = df.apply(
+        lambda r: (
+            pd.to_numeric(r["Distribuidoras al Corriente"], errors="coerce")
+            / pd.to_numeric(r["Distribuidoras Totales"], errors="coerce")
+            * 100
+        )
+        if pd.to_numeric(r["Distribuidoras Totales"], errors="coerce")
+        else 0,
+        axis=1,
+    ).fillna(0)
+
     df["Semaforo Variacion"] = df.apply(
         lambda r: "Verde" if pd.to_numeric(r["Var Dist Corriente"], errors="coerce") > 0 else "Rojo",
         axis=1,
