@@ -2662,6 +2662,24 @@ def mostrar_comentarios_ia(
     canje_promedio = (total_dispersado / total_canjes) if total_canjes else 0
     canje_promedio_dia = (dispersado_dia / canjes_dia) if canjes_dia else 0
 
+    paises_contexto = ", ".join(sorted(df_resumen_base.get("País", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()))
+    estados_contexto = sorted(df_resumen_base.get("Estado", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+    if len(estados_contexto) == 1:
+        alcance_contexto = f"Estado/departamento activo: <b>{estados_contexto[0]}</b>."
+    elif paises_contexto:
+        alcance_contexto = f"Vista consolidada para <b>{paises_contexto}</b>."
+    else:
+        alcance_contexto = "Vista consolidada de la selección actual."
+
+    modo_tabla_actual_ia = st.session_state.get("modo_tabla_resumen", "Todos")
+    busqueda_actual_ia = st.session_state.get(f"busqueda_resumen_{nivel_vista.lower()}", "")
+    filtro_resumen_ia = (
+        f" Resumen activo: <b>{modo_tabla_actual_ia}</b>, nivel <b>{nivel_vista}</b>, "
+        f"variable de orden <b>{variable_tamano}</b>."
+    )
+    if str(busqueda_actual_ia).strip():
+        filtro_resumen_ia += f" Búsqueda aplicada: <b>{busqueda_actual_ia}</b>."
+
     if calidad >= 70:
         lectura_calidad = "La calidad de cartera se mantiene en un nivel sólido; el foco debe ser conservar la disciplina operativa y proteger las zonas con mayor base al corriente."
     elif calidad >= 55:
@@ -2758,7 +2776,11 @@ def mostrar_comentarios_ia(
 <div class="ai-panel">
     <h3>Comentario IA ejecutivo</h3>
     <p>
-        <b>{nombre_valera}</b> presenta al corte <b>{fecha_sel}</b> una base de
+        <b>{nombre_valera}</b> presenta al corte <b>{fecha_sel}</b>. {alcance_contexto}
+        {filtro_resumen_ia}
+    </p>
+    <p>
+        La selección actual tiene una base de
         <b>{formato_numero(total_distribuidoras)}</b> distribuidoras. De ellas,
         <b>{formato_numero(total_corriente)}</b> están al corriente
         (<b>{pct_corriente:,.2f}%</b>) y <b>{formato_numero(total_mora)}</b> se encuentran en mora
@@ -2819,6 +2841,7 @@ def mostrar_comentarios_ia(
         partes = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)
         if len(partes) > 1:
             resumen_html = '<div class="ai-grid">' + partes[1]
+            resumen_html = resumen_html.split('\n\n<div class="ai-panel">\n    <h3>Cómo usar los botones de resumen</h3>', 1)[0]
 
     st.markdown(resumen_html, unsafe_allow_html=True)
 
@@ -3185,13 +3208,16 @@ def aplicar_estilo_geografico(fig: go.Figure, altura: int = 720):
     )
 
 def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
-    """Inserta una guía compacta dentro del mapa para no ocupar espacio adicional en la página."""
+    """Inserta una guía ejecutiva dentro del mapa para no ocupar espacio adicional en la página."""
     if tipo_mapa == "Calor Canjes":
-        lectura = "Color: canjes del corte"
+        lectura = "Color: intensidad de canjes del corte"
+        foco = "Rojo = menor actividad | Verde = mayor actividad"
     elif tipo_mapa == "Calor Dispersado":
-        lectura = "Color: dispersado del corte"
+        lectura = "Color: intensidad del importe dispersado"
+        foco = "Rojo = menor importe | Verde = mayor importe"
     else:
-        lectura = "Color: subdirección"
+        lectura = "Color: subdirección operativa"
+        foco = "Permite leer cobertura y concentración territorial"
 
     fig.add_annotation(
         x=0.012,
@@ -3203,18 +3229,19 @@ def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
         align="left",
         showarrow=False,
         text=(
-            "<b>Cómo interactuar</b><br>"
+            "<b>Guía ejecutiva del mapa</b><br>"
             f"{lectura}<br>"
-            "Hover: detalle de sucursal<br>"
-            "Clic en estado: detalle territorial<br>"
-            "Top/Bottom: resalta la selección"
+            f"{foco}<br>"
+            "<b>Cursor</b>: muestra el detalle de la sucursal<br>"
+            "<b>Clic en estado</b>: abre el detalle territorial<br>"
+            "<b>Top/Bottom</b>: enfoca sólo la selección"
         ),
-        font=dict(size=13, color=COLOR_TEXTO),
-        bgcolor="rgba(255,255,255,0.88)",
-        bordercolor=COLOR_LINEA_MAPA_55,
+        font=dict(size=13.5, color=COLOR_TEXTO),
+        bgcolor="rgba(255,255,255,0.92)",
+        bordercolor=COLOR_LINEA_MAPA_65,
         borderwidth=1,
-        borderpad=8,
-        opacity=0.96,
+        borderpad=10,
+        opacity=0.98,
     )
 
 
@@ -4217,7 +4244,7 @@ def mostrar_mapa(valera_param: str):
     st.markdown("<br>", unsafe_allow_html=True)
 
     with st.container(border=True):
-        cols_resumen_titulo = st.columns([2.8, 1, 1, 1])
+        cols_resumen_titulo = st.columns([2.55, 0.25, 1, 1, 1])
         with cols_resumen_titulo[0]:
             st.markdown(
                 f'''
@@ -4227,8 +4254,39 @@ def mostrar_mapa(valera_param: str):
 ''',
                 unsafe_allow_html=True,
             )
+        with cols_resumen_titulo[1]:
+            try:
+                with st.popover("ⓘ", use_container_width=True):
+                    st.markdown(
+                        """
+**Cómo usar los botones de resumen**
 
-        for col, opcion in zip(cols_resumen_titulo[1:], opciones_vista):
+**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
+
+**Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
+
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
+
+El buscador filtra por el nivel activo: subdirección, zona o sucursal.
+"""
+                    )
+            except Exception:
+                with st.expander("ⓘ", expanded=False):
+                    st.markdown(
+                        """
+**Cómo usar los botones de resumen**
+
+**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
+
+**Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
+
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
+
+El buscador filtra por el nivel activo: subdirección, zona o sucursal.
+"""
+                    )
+
+        for col, opcion in zip(cols_resumen_titulo[2:], opciones_vista):
             tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
             if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_resumen_{opcion}"):
                 st.session_state["nivel_vista"] = opcion
