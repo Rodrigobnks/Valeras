@@ -2780,9 +2780,7 @@ def mostrar_comentarios_ia(
 <div class="ai-panel">
     <h3>Comentario IA ejecutivo</h3>
     <p>
-        Al corte <b>{fecha_sel}</b>, <b>{nombre_valera}</b> muestra una lectura ejecutiva de la operación seleccionada.
-        {alcance_contexto} El análisis está configurado en <b>{modo_tabla_actual_ia}</b>, con apertura por
-        <b>{nivel_vista}</b> y ordenado por <b>{variable_tamano}</b>.{busqueda_texto_ia}
+        Al corte <b>{fecha_sel}</b>.
     </p>
     <p>
         La cartera analizada concentra <b>{formato_numero(total_distribuidoras)}</b> distribuidoras:
