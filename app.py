@@ -4030,21 +4030,14 @@ def mostrar_mapa(valera_param: str):
         variable_tamano=variable_tamano,
     )
 
-    # Controles de tamaño debajo del mapa.
-    # Los botones de Subdirección/Zona/Sucursal se muestran junto al título del resumen.
+    # Opciones del resumen.
+    # Los botones de nivel y la variable para Top/Bottom se muestran juntos en el recuadro del resumen.
     opciones_vista = ["Subdirección", "Zona", "Sucursal"]
     opciones_tamano = [
         "Calidad de Cartera",
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
     ]
-    cols_controles_mapa = st.columns(3)
-
-    for col, opcion in zip(cols_controles_mapa, opciones_tamano):
-        tipo = "primary" if st.session_state.get("variable_tamano") == opcion else "secondary"
-        if col.button(opcion, type=tipo, use_container_width=True, key=f"variable_tamano_{opcion}"):
-            st.session_state["variable_tamano"] = opcion
-            st.rerun()
 
     st.subheader("Resumen por país")
     resumen_pais = (
@@ -4098,36 +4091,49 @@ def mostrar_mapa(valera_param: str):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    cols_resumen_titulo = st.columns([2.8, 1, 1, 1])
-    with cols_resumen_titulo[0]:
-        st.markdown(
-            f'''
+    with st.container(border=True):
+        cols_resumen_titulo = st.columns([2.8, 1, 1, 1])
+        with cols_resumen_titulo[0]:
+            st.markdown(
+                f'''
 <div class="resumen-title-box">
     <div class="resumen-title-text">Resumen por {nivel_vista.lower()}</div>
 </div>
 ''',
-            unsafe_allow_html=True,
+                unsafe_allow_html=True,
+            )
+
+        for col, opcion in zip(cols_resumen_titulo[1:], opciones_vista):
+            tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
+            if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_resumen_{opcion}"):
+                st.session_state["nivel_vista"] = opcion
+                st.rerun()
+
+        if "modo_tabla_resumen" not in st.session_state:
+            st.session_state["modo_tabla_resumen"] = "Todos"
+
+        cols_modo_tabla = st.columns(3)
+        for col, opcion in zip(cols_modo_tabla, ["Todos", "Top 10", "Bottom 10"]):
+            tipo = "primary" if st.session_state.get("modo_tabla_resumen") == opcion else "secondary"
+            if col.button(opcion, type=tipo, use_container_width=True, key=f"modo_tabla_resumen_{opcion}"):
+                st.session_state["modo_tabla_resumen"] = opcion
+                st.rerun()
+
+        modo_tabla = st.session_state["modo_tabla_resumen"]
+
+        cols_variable_top_bottom = st.columns(3)
+        for col, opcion in zip(cols_variable_top_bottom, opciones_tamano):
+            tipo = "primary" if st.session_state.get("variable_tamano") == opcion else "secondary"
+            if col.button(opcion, type=tipo, use_container_width=True, key=f"variable_tamano_resumen_{opcion}"):
+                st.session_state["variable_tamano"] = opcion
+                st.rerun()
+
+        texto_busqueda = st.text_input(
+            f"Buscar {nivel_vista}",
+            value="",
+            placeholder=f"Escribe para filtrar por {nivel_vista.lower()}...",
+            key=f"busqueda_resumen_{nivel_vista.lower()}",
         )
-
-    for col, opcion in zip(cols_resumen_titulo[1:], opciones_vista):
-        tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
-        if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_resumen_{opcion}"):
-            st.session_state["nivel_vista"] = opcion
-            st.rerun()
-
-    modo_tabla = selector_botones(
-        "",
-        ["Todos", "Top 10", "Bottom 10"],
-        "modo_tabla_resumen",
-        "Todos",
-    )
-
-    texto_busqueda = st.text_input(
-        f"Buscar {nivel_vista}",
-        value="",
-        placeholder=f"Escribe para filtrar por {nivel_vista.lower()}...",
-        key=f"busqueda_resumen_{nivel_vista.lower()}",
-    )
 
     group_cols = [nivel_vista]
 
