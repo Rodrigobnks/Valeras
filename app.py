@@ -1908,7 +1908,7 @@ st.markdown(
     margin-bottom: 5px;
 }}
 
-.map-guide-side {
+.map-guide-side {{
     background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.96));
     border: 1px solid var(--borde);
     border-left: 7px solid var(--azul);
@@ -1916,41 +1916,41 @@ st.markdown(
     padding: 22px 24px;
     margin: 0 0 18px 0;
     box-shadow: 0 14px 34px rgba(12, 33, 74, 0.08);
-}
+}}
 
-.map-guide-side h3 {
+.map-guide-side h3 {{
     color: var(--azul);
     font-size: 24px;
     font-weight: 950;
     margin: 0 0 12px 0;
     letter-spacing: -0.2px;
-}
+}}
 
-.map-guide-side p {
+.map-guide-side p {{
     color: var(--texto);
     font-size: 16px;
     line-height: 1.55;
     font-weight: 600;
     margin: 0 0 14px 0;
-}
+}}
 
-.map-guide-side ul {
+.map-guide-side ul {{
     margin: 0;
     padding-left: 20px;
-}
+}}
 
-.map-guide-side li {
+.map-guide-side li {{
     color: var(--texto);
     font-size: 15px;
     line-height: 1.55;
     font-weight: 600;
     margin-bottom: 7px;
-}
+}}
 
-.map-guide-side b {
+.map-guide-side b {{
     color: var(--azul);
     font-weight: 900;
-}
+}}
 
 @media (max-width: 900px) {{
     .ai-grid,
