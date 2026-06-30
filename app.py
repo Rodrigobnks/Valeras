@@ -3184,6 +3184,40 @@ def aplicar_estilo_geografico(fig: go.Figure, altura: int = 720):
         geo=dict(bgcolor="rgba(255,255,255,0)"),
     )
 
+def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
+    """Inserta una guía compacta dentro del mapa para no ocupar espacio adicional en la página."""
+    if tipo_mapa == "Calor Canjes":
+        lectura = "Color: canjes del corte"
+    elif tipo_mapa == "Calor Dispersado":
+        lectura = "Color: dispersado del corte"
+    else:
+        lectura = "Color: subdirección"
+
+    fig.add_annotation(
+        x=0.012,
+        y=0.985,
+        xref="paper",
+        yref="paper",
+        xanchor="left",
+        yanchor="top",
+        align="left",
+        showarrow=False,
+        text=(
+            "<b>Cómo interactuar</b><br>"
+            f"{lectura}<br>"
+            "Hover: detalle de sucursal<br>"
+            "Clic en estado: detalle territorial<br>"
+            "Top/Bottom: resalta la selección"
+        ),
+        font=dict(size=13, color=COLOR_TEXTO),
+        bgcolor="rgba(255,255,255,0.88)",
+        bordercolor=COLOR_LINEA_MAPA_55,
+        borderwidth=1,
+        borderpad=8,
+        opacity=0.96,
+    )
+
+
 
 def calcular_resumen_nivel_tabla(
     df_resumen_base: pd.DataFrame,
@@ -3529,6 +3563,7 @@ def construir_mapa_estados_mexico(
     fig.update_layout(
         title=f"Mapa político de México con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
+    agregar_guia_interaccion_mapa(fig, tipo_mapa)
 
     evento = None
 
@@ -3629,6 +3664,7 @@ def construir_mapa_estados_peru(
     fig.update_layout(
         title=f"Mapa político de Perú con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
+    agregar_guia_interaccion_mapa(fig, tipo_mapa)
 
     evento = None
 
@@ -3843,6 +3879,7 @@ def construir_mapa_estado_burbujas(
     fig.update_layout(
         title=f"{estado} - {titulo_division} con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
+    agregar_guia_interaccion_mapa(fig, tipo_mapa)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -3859,6 +3896,13 @@ def mostrar_mapa(valera_param: str):
     nombre_valera = item_valera["nombre"]
     pais_exclusivo = item_valera.get("pais_exclusivo")
     usar_distribuidoras_mx = item_valera.get("usar_distribuidoras_mx", False)
+
+    # Al entrar a una valera nueva, fuerza siempre el mapa completo.
+    if st.session_state.get("__ultima_valera_abierta") != valera_param:
+        st.session_state["__ultima_valera_abierta"] = valera_param
+        if get_query_param("estado", ""):
+            set_query_params(valera=valera_param)
+            st.rerun()
 
     if usar_distribuidoras_mx and ARCHIVO_DISTRIBUIDORAS_MX.exists():
         try:
@@ -3904,7 +3948,7 @@ def mostrar_mapa(valera_param: str):
         f"""
 <div class="top-bar">
     <h1 class="map-title">{nombre_valera}</h1>
-    <a class="back-link" href="/" target="_self">← Volver a Valeras</a>
+    <a class="back-link" href="?home=1" target="_self">← Volver a Valeras</a>
 </div>
 """,
         unsafe_allow_html=True,
@@ -4038,7 +4082,6 @@ def mostrar_mapa(valera_param: str):
             "tipo_mapa_valeras",
             "Subdirección",
         )
-        st.markdown(html_guia_mapa_previa(tipo_mapa), unsafe_allow_html=True)
 
     # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
     paises_datos = sorted(df_filtrado["País"].dropna().unique().tolist())
@@ -4281,7 +4324,22 @@ def mostrar_mapa(valera_param: str):
 # ======================================================
 # ROUTER
 # ======================================================
+home_param = get_query_param("home", "")
 valera_seleccionada = get_query_param("valera", "")
+
+# Fuerza portada al presionar "Volver a Valeras".
+if home_param:
+    set_query_params()
+    mostrar_inicio()
+    st.stop()
+
+# Cada sesión nueva inicia en portada, aunque el navegador conserve una URL vieja con ?valera=.
+if "__sesion_iniciada_en_portada" not in st.session_state:
+    st.session_state["__sesion_iniciada_en_portada"] = True
+    if valera_seleccionada:
+        set_query_params()
+        mostrar_inicio()
+        st.stop()
 
 if valera_seleccionada:
     mostrar_mapa(valera_seleccionada)
