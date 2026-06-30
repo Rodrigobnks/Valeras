@@ -63,8 +63,14 @@ def img_src(path: Path) -> str:
 
 
 def buscar_asset(nombres: list[str]) -> Path:
+    # Busca primero dentro de assets/ y después en la raíz del repositorio.
+    # Esto permite que los logos funcionen aunque se hayan subido sueltos a GitHub.
     for nombre in nombres:
         ruta = ASSETS_DIR / nombre
+        if ruta.exists():
+            return ruta
+
+        ruta = BASE_DIR / nombre
         if ruta.exists():
             return ruta
 
