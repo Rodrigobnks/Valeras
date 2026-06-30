@@ -1715,6 +1715,24 @@ st.markdown(
     margin-bottom: 7px;
 }}
 
+.resumen-title-box {{
+    background: rgba(255,255,255,0.94);
+    border: 1px solid var(--borde);
+    border-radius: 18px;
+    padding: 13px 18px;
+    box-shadow: 0 12px 28px rgba(12, 33, 74, 0.08);
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+}}
+
+.resumen-title-text {{
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--texto);
+    opacity: 0.78;
+}}
+
 
 
 /* Botones y controles con el color de la valera seleccionada */
@@ -1983,14 +2001,15 @@ por país o valera.
 # BOTONES
 # ======================================================
 def selector_botones(titulo: str, opciones: list[str], key: str, default: str) -> str:
-    st.markdown(
-        f"""
+    if titulo:
+        st.markdown(
+            f"""
 <div class="selector-box">
 <div class="small-caption">{titulo}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
     if key not in st.session_state:
         st.session_state[key] = default
@@ -4011,22 +4030,17 @@ def mostrar_mapa(valera_param: str):
         variable_tamano=variable_tamano,
     )
 
-    # Controles del mapa debajo del mapa y justo antes del resumen por país.
+    # Controles de tamaño debajo del mapa.
+    # Los botones de Subdirección/Zona/Sucursal se muestran junto al título del resumen.
     opciones_vista = ["Subdirección", "Zona", "Sucursal"]
     opciones_tamano = [
         "Calidad de Cartera",
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
     ]
-    cols_controles_mapa = st.columns(6)
+    cols_controles_mapa = st.columns(3)
 
-    for col, opcion in zip(cols_controles_mapa[:3], opciones_vista):
-        tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
-        if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_{opcion}"):
-            st.session_state["nivel_vista"] = opcion
-            st.rerun()
-
-    for col, opcion in zip(cols_controles_mapa[3:], opciones_tamano):
+    for col, opcion in zip(cols_controles_mapa, opciones_tamano):
         tipo = "primary" if st.session_state.get("variable_tamano") == opcion else "secondary"
         if col.button(opcion, type=tipo, use_container_width=True, key=f"variable_tamano_{opcion}"):
             st.session_state["variable_tamano"] = opcion
@@ -4084,8 +4098,25 @@ def mostrar_mapa(valera_param: str):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    cols_resumen_titulo = st.columns([2.8, 1, 1, 1])
+    with cols_resumen_titulo[0]:
+        st.markdown(
+            f'''
+<div class="resumen-title-box">
+    <div class="resumen-title-text">Resumen por {nivel_vista.lower()}</div>
+</div>
+''',
+            unsafe_allow_html=True,
+        )
+
+    for col, opcion in zip(cols_resumen_titulo[1:], opciones_vista):
+        tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
+        if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_resumen_{opcion}"):
+            st.session_state["nivel_vista"] = opcion
+            st.rerun()
+
     modo_tabla = selector_botones(
-        f"Resumen por {nivel_vista.lower()}",
+        "",
         ["Todos", "Top 10", "Bottom 10"],
         "modo_tabla_resumen",
         "Todos",
