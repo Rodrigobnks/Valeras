@@ -4327,19 +4327,12 @@ def mostrar_mapa(valera_param: str):
 home_param = get_query_param("home", "")
 valera_seleccionada = get_query_param("valera", "")
 
-# Fuerza portada al presionar "Volver a Valeras".
+# Fuerza portada sólo cuando se presiona "Volver a Valeras".
+# No se bloquea ?valera= porque ese mismo parámetro es el que usan las tarjetas para entrar.
 if home_param:
     set_query_params()
     mostrar_inicio()
     st.stop()
-
-# Cada sesión nueva inicia en portada, aunque el navegador conserve una URL vieja con ?valera=.
-if "__sesion_iniciada_en_portada" not in st.session_state:
-    st.session_state["__sesion_iniciada_en_portada"] = True
-    if valera_seleccionada:
-        set_query_params()
-        mostrar_inicio()
-        st.stop()
 
 if valera_seleccionada:
     mostrar_mapa(valera_seleccionada)
