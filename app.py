@@ -4179,6 +4179,8 @@ def mostrar_mapa(valera_param: str):
         variable_tamano=variable_tamano,
     )
 
+    tipo_mapa = st.session_state.get("tipo_mapa_valeras", "Subdirección")
+
     cols_ia_tipo_mapa = st.columns([2.2, 1])
     with cols_ia_tipo_mapa[0]:
         mostrar_comentarios_ia(
@@ -4189,17 +4191,9 @@ def mostrar_mapa(valera_param: str):
             fecha_sel=fecha_sel,
             nivel_vista=nivel_vista,
             variable_tamano=variable_tamano,
-            tipo_mapa=st.session_state.get("tipo_mapa_valeras", "Subdirección"),
+            tipo_mapa=tipo_mapa,
             solo_ejecutivo=True,
             conservar_tarjetas=bool(estado_sel),
-        )
-
-    with cols_ia_tipo_mapa[1]:
-        tipo_mapa = selector_botones(
-            "Tipo de mapa",
-            ["Subdirección", "Calor Canjes", "Calor Dispersado"],
-            "tipo_mapa_valeras",
-            "Subdirección",
         )
 
     # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
@@ -4266,6 +4260,15 @@ def mostrar_mapa(valera_param: str):
         )
 
         st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
+
+    cols_tipo_mapa_bajo_leyenda = st.columns([2.2, 1])
+    with cols_tipo_mapa_bajo_leyenda[1]:
+        tipo_mapa = selector_botones(
+            "Tipo de mapa",
+            ["Subdirección", "Calor Canjes", "Calor Dispersado"],
+            "tipo_mapa_valeras",
+            "Subdirección",
+        )
 
     df_mapa = preparar_mapa_por_nivel(
         df=df_resumen_base,
