@@ -3247,6 +3247,7 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
     el ícono desaparece. Al hacer clic fuera del recuadro, se cierra solo.
     """
     texto_guia = texto_guia_interaccion_mapa(tipo_mapa)
+    ayuda_id = "map_help_" + re.sub(r"[^a-zA-Z0-9_]", "_", limpiar_texto(tipo_mapa).lower())
 
     st.markdown(
         f"""
@@ -3257,13 +3258,16 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
     z-index: 50;
 }}
 
+.map-help-checkbox {{
+    display: none;
+}}
+
 .map-help-widget {{
     position: absolute;
-    top: 18px;
+    top: 76px;
     left: 18px;
     z-index: 9999;
     display: inline-block;
-    outline: none;
 }}
 
 .map-help-button {{
@@ -3277,6 +3281,10 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
     font-weight: 900;
     cursor: pointer;
     box-shadow: 0 8px 18px rgba(12, 33, 74, 0.08);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
 }}
 
 .map-help-button:hover {{
@@ -3284,31 +3292,48 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
     border-color: {COLOR_PRIMARIO};
 }}
 
+.map-help-backdrop {{
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9990;
+    cursor: default;
+    background: rgba(255,255,255,0);
+}}
+
 .map-help-panel {{
     display: none;
     width: min(1120px, calc(100vw - 100px));
     max-width: calc(100vw - 100px);
-    background: rgba(255,255,255,0.96);
+    background: rgba(255,255,255,0.97);
     border: 1px solid {COLOR_LINEA_MAPA_65};
     color: {COLOR_TEXTO};
     padding: 14px 16px;
     font-size: 14px;
     line-height: 1.45;
     box-shadow: 0 14px 32px rgba(12, 33, 74, 0.10);
+    position: relative;
+    z-index: 9999;
 }}
 
-.map-help-widget:focus-within .map-help-button {{
+#{ayuda_id}:checked ~ .map-help-widget .map-help-button {{
     display: none;
 }}
 
-.map-help-widget:focus-within .map-help-panel {{
+#{ayuda_id}:checked ~ .map-help-widget .map-help-panel {{
+    display: block;
+}}
+
+#{ayuda_id}:checked ~ .map-help-backdrop {{
     display: block;
 }}
 </style>
 <div class="map-help-layer">
-    <div class="map-help-widget" tabindex="0">
-        <button class="map-help-button" type="button" aria-label="Abrir guía del mapa">ⓘ</button>
-        <div class="map-help-panel" tabindex="0">{texto_guia}</div>
+    <input class="map-help-checkbox" id="{ayuda_id}" type="checkbox">
+    <label class="map-help-backdrop" for="{ayuda_id}" aria-label="Cerrar guía del mapa"></label>
+    <div class="map-help-widget">
+        <label class="map-help-button" for="{ayuda_id}" aria-label="Abrir guía del mapa">ⓘ</label>
+        <div class="map-help-panel">{texto_guia}</div>
     </div>
 </div>
 """,
