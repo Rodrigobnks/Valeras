@@ -3267,8 +3267,6 @@ def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
                 showactive=False,
                 x=0.012,
                 y=0.985,
-                xref="paper",
-                yref="paper",
                 xanchor="left",
                 yanchor="top",
                 pad={"r": 4, "t": 4},
