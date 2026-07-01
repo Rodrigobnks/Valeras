@@ -3212,83 +3212,108 @@ def aplicar_estilo_geografico(fig: go.Figure, altura: int = 720):
         geo=dict(bgcolor="rgba(255,255,255,0)"),
     )
 
-def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
+def texto_guia_interaccion_mapa(tipo_mapa: str) -> str:
     """
-    Agrega un botón de ayuda dentro del mapa. La guía no se muestra fija:
-    se abre únicamente cuando el usuario da clic en el ícono ⓘ del mapa.
+    Devuelve el texto ejecutivo de ayuda del mapa.
+    Se usa en un recuadro flotante externo a Plotly para que pueda cerrarse
+    al dar clic fuera, sin depender de botones internos del gráfico.
     """
     if tipo_mapa == "Calor Canjes":
-        lectura = "El color representa la intensidad de canjes realizados en la fecha de corte."
-        foco = "Los tonos rojos ayudan a ubicar menor actividad del día; los tonos verdes señalan dónde se concentró más movimiento."
+        lectura = "En esta vista, el color ayuda a leer la intensidad de canjes realizados en la fecha de corte."
+        foco = "Los tonos de menor intensidad permiten detectar puntos con baja actividad del día, mientras que los tonos más altos muestran dónde se concentró el movimiento operativo."
     elif tipo_mapa == "Calor Dispersado":
-        lectura = "El color representa el importe dispersado específicamente en la fecha de corte."
-        foco = "Los tonos rojos señalan menor dispersión del día; los tonos verdes muestran las zonas o sucursales con mayor concentración de importe."
+        lectura = "En esta vista, el color resume el importe dispersado específicamente en la fecha de corte."
+        foco = "Los tonos de menor intensidad ayudan a ubicar territorios con baja dispersión diaria; los tonos más altos señalan dónde se concentró el mayor importe."
     else:
-        lectura = "El color separa las sucursales por Subdirección para leer la cobertura territorial de forma rápida."
-        foco = "Esta vista sirve para ver cómo se distribuye la operación, dónde hay mayor concentración y qué territorios conviene revisar con más detalle."
+        lectura = "En esta vista, cada color separa las sucursales por Subdirección para leer la cobertura territorial de forma rápida."
+        foco = "La intención es identificar cómo se distribuye la operación, dónde existe mayor concentración de sucursales y qué territorios conviene revisar con más detalle."
 
-    texto_guia = (
+    return (
         "<b>Guía ejecutiva del mapa</b><br>"
-        f"{lectura}<br>"
+        f"{lectura} "
         f"{foco}<br><br>"
-        "<b>Cómo leerlo:</b> coloca el cursor sobre una bolita para ver el detalle de la sucursal, "
-        "incluyendo calidad, distribuidoras, canjes y dispersión.<br>"
+        "<b>Cómo leerlo:</b> coloca el cursor sobre una bolita para consultar el detalle de la sucursal: "
+        "calidad de cartera, distribuidoras, canjes y dispersión. Así puedes interpretar cada punto sin perder la vista general del territorio.<br>"
         "<b>Cómo profundizar:</b> da clic sobre un estado o departamento para abrir su detalle territorial. "
-        "Cuando ya estés dentro del estado, el mapa muestra la división local y las sucursales correspondientes.<br>"
-        "<b>Top/Bottom:</b> al usar esos botones, el mapa se enfoca en la selección activa para que sea más fácil comparar los mejores y peores desempeños."
+        "Dentro del estado, el mapa cambia a una lectura local con la división municipal o departamental y las sucursales correspondientes.<br>"
+        "<b>Top/Bottom:</b> cuando uses esos botones, el mapa se enfoca sólo en la selección activa para comparar con mayor claridad los mejores y peores desempeños."
     )
 
-    guia_abierta = [
-        dict(
-            x=0.012,
-            y=0.985,
-            xref="paper",
-            yref="paper",
-            xanchor="left",
-            yanchor="top",
-            align="left",
-            showarrow=False,
-            text=texto_guia,
-            font=dict(size=13.5, color=COLOR_TEXTO),
-            bgcolor="rgba(255,255,255,0.95)",
-            bordercolor=COLOR_LINEA_MAPA_65,
-            borderwidth=1,
-            borderpad=10,
-            opacity=0.98,
-        )
-    ]
 
-    fig.update_layout(
-        annotations=[],
-        updatemenus=[
-            dict(
-                type="buttons",
-                direction="right",
-                showactive=False,
-                x=0.012,
-                y=0.985,
-                xanchor="left",
-                yanchor="top",
-                pad={"r": 4, "t": 4},
-                bgcolor="rgba(255,255,255,0.96)",
-                bordercolor=COLOR_LINEA_MAPA_65,
-                borderwidth=1,
-                buttons=[
-                    dict(
-                        label="ⓘ",
-                        method="relayout",
-                        args=[{"annotations": guia_abierta}],
-                    ),
-                    dict(
-                        label="×",
-                        method="relayout",
-                        args=[{"annotations": []}],
-                    ),
-                ],
-            )
-        ],
+def renderizar_guia_interaccion_mapa(tipo_mapa: str):
+    """
+    Muestra un ícono de ayuda flotante sobre el mapa.
+    Al hacer clic en el ícono se abre el recuadro; mientras está abierto,
+    el ícono desaparece. Al hacer clic fuera del recuadro, se cierra solo.
+    """
+    texto_guia = texto_guia_interaccion_mapa(tipo_mapa)
+
+    st.markdown(
+        f"""
+<style>
+.map-help-layer {{
+    position: relative;
+    height: 0;
+    z-index: 50;
+}}
+
+.map-help-widget {{
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    z-index: 9999;
+    display: inline-block;
+    outline: none;
+}}
+
+.map-help-button {{
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    border: 1px solid {COLOR_LINEA_MAPA_65};
+    background: rgba(255,255,255,0.96);
+    color: {COLOR_TEXTO};
+    font-size: 18px;
+    font-weight: 900;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(12, 33, 74, 0.08);
+}}
+
+.map-help-button:hover {{
+    background: rgba(255,255,255,1);
+    border-color: {COLOR_PRIMARIO};
+}}
+
+.map-help-panel {{
+    display: none;
+    width: min(1120px, calc(100vw - 100px));
+    max-width: calc(100vw - 100px);
+    background: rgba(255,255,255,0.96);
+    border: 1px solid {COLOR_LINEA_MAPA_65};
+    color: {COLOR_TEXTO};
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.45;
+    box-shadow: 0 14px 32px rgba(12, 33, 74, 0.10);
+}}
+
+.map-help-widget:focus-within .map-help-button {{
+    display: none;
+}}
+
+.map-help-widget:focus-within .map-help-panel {{
+    display: block;
+}}
+</style>
+<div class="map-help-layer">
+    <div class="map-help-widget" tabindex="0">
+        <button class="map-help-button" type="button" aria-label="Abrir guía del mapa">ⓘ</button>
+        <div class="map-help-panel" tabindex="0">{texto_guia}</div>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
     )
-
 
 def calcular_resumen_nivel_tabla(
     df_resumen_base: pd.DataFrame,
@@ -3631,7 +3656,7 @@ def construir_mapa_estados_mexico(
     fig.update_layout(
         title=f"Mapa político de México con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    agregar_guia_interaccion_mapa(fig, tipo_mapa)
+    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     evento = None
 
@@ -3732,7 +3757,7 @@ def construir_mapa_estados_peru(
     fig.update_layout(
         title=f"Mapa político de Perú con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    agregar_guia_interaccion_mapa(fig, tipo_mapa)
+    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     evento = None
 
@@ -3947,7 +3972,7 @@ def construir_mapa_estado_burbujas(
     fig.update_layout(
         title=f"{estado} - {titulo_division} con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    agregar_guia_interaccion_mapa(fig, tipo_mapa)
+    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     st.plotly_chart(fig, use_container_width=True)
 
