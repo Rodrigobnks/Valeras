@@ -3219,19 +3219,23 @@ def texto_guia_interaccion_mapa(tipo_mapa: str) -> str:
     al dar clic fuera, sin depender de botones internos del gráfico.
     """
     if tipo_mapa == "Calor Canjes":
-        lectura = "En esta vista, el color ayuda a leer la intensidad de canjes realizados en la fecha de corte."
-        foco = "Los tonos de menor intensidad permiten detectar puntos con baja actividad del día, mientras que los tonos más altos muestran dónde se concentró el movimiento operativo."
+        lectura = "Estás viendo el mapa en modo <b>Calor Canjes</b>. En esta lectura, cada bolita se colorea según los canjes realizados exactamente en la fecha de corte."
+        foco = "Los tonos de menor intensidad ayudan a detectar sucursales con baja actividad del día, mientras que los tonos más altos muestran dónde se concentró el mayor número de canjes."
     elif tipo_mapa == "Calor Dispersado":
-        lectura = "En esta vista, el color resume el importe dispersado específicamente en la fecha de corte."
-        foco = "Los tonos de menor intensidad ayudan a ubicar territorios con baja dispersión diaria; los tonos más altos señalan dónde se concentró el mayor importe."
+        lectura = "Estás viendo el mapa en modo <b>Calor Dispersado</b>. En esta lectura, cada bolita se colorea según el importe dispersado exactamente en la fecha de corte."
+        foco = "Los tonos de menor intensidad permiten ubicar territorios con baja dispersión diaria; los tonos más altos señalan las sucursales donde se concentró el mayor monto colocado."
     else:
-        lectura = "En esta vista, cada color separa las sucursales por Subdirección para leer la cobertura territorial de forma rápida."
-        foco = "La intención es identificar cómo se distribuye la operación, dónde existe mayor concentración de sucursales y qué territorios conviene revisar con más detalle."
+        lectura = "Estás viendo el mapa en modo <b>Subdirección</b>. En esta lectura, el color no mide desempeño, sino estructura: cada bolita se pinta según la Subdirección a la que pertenece la sucursal."
+        foco = "Esto sirve para leer rápidamente la cobertura territorial, identificar concentración operativa por estructura y ubicar qué subdirecciones tienen presencia en cada zona del mapa."
 
     return (
         "<b>Guía ejecutiva del mapa</b><br>"
         f"{lectura} "
         f"{foco}<br><br>"
+        "<b>Botones de tipo de mapa:</b> usa <b>Subdirección</b> cuando quieras entender la distribución territorial de la estructura; "
+        "usa <b>Calor Canjes</b> cuando quieras comparar la actividad del día por número de canjes; "
+        "y usa <b>Calor Dispersado</b> cuando quieras comparar dónde se concentró el importe dispersado del corte. "
+        "Los tres botones conservan las mismas sucursales y KPIs; lo que cambia es la forma de colorear el mapa para responder una pregunta distinta.<br><br>"
         "<b>Cómo leerlo:</b> coloca el cursor sobre una bolita para consultar el detalle de la sucursal: "
         "calidad de cartera, distribuidoras, canjes y dispersión. Así puedes interpretar cada punto sin perder la vista general del territorio.<br>"
         "<b>Cómo profundizar:</b> da clic sobre un estado o departamento para abrir su detalle territorial. "
