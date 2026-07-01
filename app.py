@@ -4206,6 +4206,13 @@ def mostrar_mapa(valera_param: str):
     es_mexico = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("MÉXICO")
     es_peru = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("PERÚ")
 
+    detalle_estado_activo = bool(estado_sel and (es_mexico or es_peru))
+    elementos_estructura_actual = int(df_mapa_previo[nivel_vista].nunique()) if nivel_vista in df_mapa_previo.columns else 0
+    mostrar_top_bottom_detalle = (not detalle_estado_activo) or elementos_estructura_actual >= 20
+
+    if not mostrar_top_bottom_detalle and st.session_state.get("modo_tabla_resumen") in ["Top 10", "Bottom 10"]:
+        st.session_state["modo_tabla_resumen"] = "Todos"
+
     modo_tabla_actual = st.session_state.get("modo_tabla_resumen", "Todos")
     texto_busqueda_actual = st.session_state.get(f"busqueda_resumen_{nivel_vista.lower()}", "")
     valores_destacados_mapa = calcular_destacados_mapa(
@@ -4347,6 +4354,35 @@ def mostrar_mapa(valera_param: str):
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+    if mostrar_top_bottom_detalle:
+        texto_ayuda_resumen = f"""
+**Cómo usar los botones de resumen**
+
+**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
+
+**Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
+
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
+
+Cuando estás dentro del detalle de un estado, los botones **Top 10** y **Bottom 10** sólo se muestran si el nivel seleccionado tiene **20 o más elementos**. En este momento hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**, por eso la vista permite comparar extremos sin perder contexto operativo.
+
+El buscador filtra por el nivel activo: subdirección, zona o sucursal.
+"""
+    else:
+        texto_ayuda_resumen = f"""
+**Cómo usar los botones de resumen**
+
+**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
+
+En el detalle de este estado hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**. Como son menos de 20, no se muestran los botones **Top 10** y **Bottom 10**, porque segmentar una base tan pequeña puede quitar contexto en lugar de ayudar.
+
+En este caso, la tabla se mantiene completa y se ordena automáticamente de **mayor a menor** según la variable seleccionada: **{variable_tamano}**. Así puedes ver primero las estructuras con mayor peso operativo sin ocultar ningún registro.
+
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** cambian la variable de ordenamiento y también la referencia de tamaño de las bolitas del mapa.
+
+El buscador filtra por el nivel activo: subdirección, zona o sucursal.
+"""
+
     with st.container(border=True):
         cols_resumen_titulo = st.columns([2.55, 0.25, 1, 1, 1])
         with cols_resumen_titulo[0]:
@@ -4361,34 +4397,10 @@ def mostrar_mapa(valera_param: str):
         with cols_resumen_titulo[1]:
             try:
                 with st.popover("ⓘ", use_container_width=True):
-                    st.markdown(
-                        """
-**Cómo usar los botones de resumen**
-
-**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
-
-**Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
-
-**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
-
-El buscador filtra por el nivel activo: subdirección, zona o sucursal.
-"""
-                    )
+                    st.markdown(texto_ayuda_resumen)
             except Exception:
                 with st.expander("ⓘ", expanded=False):
-                    st.markdown(
-                        """
-**Cómo usar los botones de resumen**
-
-**Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
-
-**Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
-
-**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
-
-El buscador filtra por el nivel activo: subdirección, zona o sucursal.
-"""
-                    )
+                    st.markdown(texto_ayuda_resumen)
 
         for col, opcion in zip(cols_resumen_titulo[2:], opciones_vista):
             tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
@@ -4399,12 +4411,15 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         if "modo_tabla_resumen" not in st.session_state:
             st.session_state["modo_tabla_resumen"] = "Todos"
 
-        cols_modo_tabla = st.columns(3)
-        for col, opcion in zip(cols_modo_tabla, ["Todos", "Top 10", "Bottom 10"]):
-            tipo = "primary" if st.session_state.get("modo_tabla_resumen") == opcion else "secondary"
-            if col.button(opcion, type=tipo, use_container_width=True, key=f"modo_tabla_resumen_{opcion}"):
-                st.session_state["modo_tabla_resumen"] = opcion
-                st.rerun()
+        if mostrar_top_bottom_detalle:
+            cols_modo_tabla = st.columns(3)
+            for col, opcion in zip(cols_modo_tabla, ["Todos", "Top 10", "Bottom 10"]):
+                tipo = "primary" if st.session_state.get("modo_tabla_resumen") == opcion else "secondary"
+                if col.button(opcion, type=tipo, use_container_width=True, key=f"modo_tabla_resumen_{opcion}"):
+                    st.session_state["modo_tabla_resumen"] = opcion
+                    st.rerun()
+        else:
+            st.session_state["modo_tabla_resumen"] = "Todos"
 
         modo_tabla = st.session_state["modo_tabla_resumen"]
 
