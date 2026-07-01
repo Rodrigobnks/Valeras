@@ -3213,42 +3213,83 @@ def aplicar_estilo_geografico(fig: go.Figure, altura: int = 720):
     )
 
 def agregar_guia_interaccion_mapa(fig: go.Figure, tipo_mapa: str):
-    """Inserta una guía ejecutiva dentro del mapa para no ocupar espacio adicional en la página."""
+    """
+    Agrega un botón de ayuda dentro del mapa. La guía no se muestra fija:
+    se abre únicamente cuando el usuario da clic en el ícono ⓘ del mapa.
+    """
     if tipo_mapa == "Calor Canjes":
-        lectura = "Color: intensidad de canjes del corte"
-        foco = "Rojo = menor actividad | Verde = mayor actividad"
+        lectura = "El color representa la intensidad de canjes realizados en la fecha de corte."
+        foco = "Los tonos rojos ayudan a ubicar menor actividad del día; los tonos verdes señalan dónde se concentró más movimiento."
     elif tipo_mapa == "Calor Dispersado":
-        lectura = "Color: intensidad del importe dispersado"
-        foco = "Rojo = menor importe | Verde = mayor importe"
+        lectura = "El color representa el importe dispersado específicamente en la fecha de corte."
+        foco = "Los tonos rojos señalan menor dispersión del día; los tonos verdes muestran las zonas o sucursales con mayor concentración de importe."
     else:
-        lectura = "Color: subdirección operativa"
-        foco = "Permite leer cobertura y concentración territorial"
+        lectura = "El color separa las sucursales por Subdirección para leer la cobertura territorial de forma rápida."
+        foco = "Esta vista sirve para ver cómo se distribuye la operación, dónde hay mayor concentración y qué territorios conviene revisar con más detalle."
 
-    fig.add_annotation(
-        x=0.012,
-        y=0.985,
-        xref="paper",
-        yref="paper",
-        xanchor="left",
-        yanchor="top",
-        align="left",
-        showarrow=False,
-        text=(
-            "<b>Guía ejecutiva del mapa</b><br>"
-            f"{lectura}<br>"
-            f"{foco}<br>"
-            "<b>Cursor</b>: muestra el detalle de la sucursal<br>"
-            "<b>Clic en estado</b>: abre el detalle territorial<br>"
-            "<b>Top/Bottom</b>: enfoca sólo la selección"
-        ),
-        font=dict(size=13.5, color=COLOR_TEXTO),
-        bgcolor="rgba(255,255,255,0.92)",
-        bordercolor=COLOR_LINEA_MAPA_65,
-        borderwidth=1,
-        borderpad=10,
-        opacity=0.98,
+    texto_guia = (
+        "<b>Guía ejecutiva del mapa</b><br>"
+        f"{lectura}<br>"
+        f"{foco}<br><br>"
+        "<b>Cómo leerlo:</b> coloca el cursor sobre una bolita para ver el detalle de la sucursal, "
+        "incluyendo calidad, distribuidoras, canjes y dispersión.<br>"
+        "<b>Cómo profundizar:</b> da clic sobre un estado o departamento para abrir su detalle territorial. "
+        "Cuando ya estés dentro del estado, el mapa muestra la división local y las sucursales correspondientes.<br>"
+        "<b>Top/Bottom:</b> al usar esos botones, el mapa se enfoca en la selección activa para que sea más fácil comparar los mejores y peores desempeños."
     )
 
+    guia_abierta = [
+        dict(
+            x=0.012,
+            y=0.985,
+            xref="paper",
+            yref="paper",
+            xanchor="left",
+            yanchor="top",
+            align="left",
+            showarrow=False,
+            text=texto_guia,
+            font=dict(size=13.5, color=COLOR_TEXTO),
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor=COLOR_LINEA_MAPA_65,
+            borderwidth=1,
+            borderpad=10,
+            opacity=0.98,
+        )
+    ]
+
+    fig.update_layout(
+        annotations=[],
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="right",
+                showactive=False,
+                x=0.012,
+                y=0.985,
+                xref="paper",
+                yref="paper",
+                xanchor="left",
+                yanchor="top",
+                pad={"r": 4, "t": 4},
+                bgcolor="rgba(255,255,255,0.96)",
+                bordercolor=COLOR_LINEA_MAPA_65,
+                borderwidth=1,
+                buttons=[
+                    dict(
+                        label="ⓘ",
+                        method="relayout",
+                        args=[{"annotations": guia_abierta}],
+                    ),
+                    dict(
+                        label="×",
+                        method="relayout",
+                        args=[{"annotations": []}],
+                    ),
+                ],
+            )
+        ],
+    )
 
 
 def calcular_resumen_nivel_tabla(
