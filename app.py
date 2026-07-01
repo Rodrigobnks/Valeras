@@ -3523,16 +3523,11 @@ def agregar_poligonos_neutros_estado_departamento(
                     "Resumen Sucursales",
                 ]
             ],
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "Subdirección principal: %{customdata[1]}<br><br>"
-                "Calidad de Cartera: %{customdata[2]:,.2f}%<br>"
-                "Distribuidoras Totales: %{customdata[3]:,.0f}<br>"
-                "Distribuidoras al Corriente: %{customdata[4]:,.0f}<br><br>"
-                "<b>Resumen por sucursal</b><br>"
-                "%{customdata[5]}"
-                "<extra></extra>"
-            ),
+            # El polígono del estado/departamento se mantiene seleccionable,
+            # pero no muestra recuadro emergente al pasar el cursor.
+            # El tooltip ejecutivo queda únicamente en las bolitas de sucursal.
+            hoverinfo="skip",
+            hovertemplate=None,
         )
     )
 
@@ -4190,7 +4185,11 @@ def mostrar_mapa(valera_param: str):
         "Distribuidoras al Corriente",
     ]
 
-    st.subheader("Resumen por país")
+    mostrar_resumen_pais = not bool(estado_sel and (es_mexico or es_peru))
+
+    if mostrar_resumen_pais:
+        st.subheader("Resumen por país")
+
     resumen_pais = (
         df_resumen_base.groupby("País", as_index=False)
         .agg(
@@ -4227,21 +4226,22 @@ def mostrar_mapa(valera_param: str):
     resumen_pais = agregar_columnas_variacion(resumen_pais)
     resumen_pais = recalcular_canje_promedio(resumen_pais)
 
-    mostrar_comentarios_ia(
-        df_resumen_base=df_resumen_base,
-        df_mapa=df_mapa,
-        resumen_pais=resumen_pais,
-        nombre_valera=nombre_valera,
-        fecha_sel=fecha_sel,
-        nivel_vista=nivel_vista,
-        variable_tamano=variable_tamano,
-        tipo_mapa=tipo_mapa,
-        ocultar_ejecutivo=True,
-    )
+    if mostrar_resumen_pais:
+        mostrar_comentarios_ia(
+            df_resumen_base=df_resumen_base,
+            df_mapa=df_mapa,
+            resumen_pais=resumen_pais,
+            nombre_valera=nombre_valera,
+            fecha_sel=fecha_sel,
+            nivel_vista=nivel_vista,
+            variable_tamano=variable_tamano,
+            tipo_mapa=tipo_mapa,
+            ocultar_ejecutivo=True,
+        )
 
-    mostrar_tabla_variacion(resumen_pais)
+        mostrar_tabla_variacion(resumen_pais)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
     with st.container(border=True):
         cols_resumen_titulo = st.columns([2.55, 0.25, 1, 1, 1])
