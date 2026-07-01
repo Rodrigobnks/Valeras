@@ -2642,6 +2642,7 @@ def mostrar_comentarios_ia(
     tipo_mapa: str,
     solo_ejecutivo: bool = False,
     ocultar_ejecutivo: bool = False,
+    conservar_tarjetas: bool = False,
 ):
     if df_resumen_base.empty:
         return
@@ -2836,7 +2837,11 @@ def mostrar_comentarios_ia(
 </div>
 """
     if solo_ejecutivo:
-        resumen_html = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)[0]
+        if conservar_tarjetas:
+            partes = resumen_html.split('\n\n<div class="ai-panel">\n    <h3>Cómo usar los botones de resumen</h3>', 1)
+            resumen_html = partes[0]
+        else:
+            resumen_html = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)[0]
     elif ocultar_ejecutivo:
         partes = resumen_html.split("\n\n<div class=\"ai-grid\">", 1)
         if len(partes) > 1:
@@ -3525,8 +3530,10 @@ def agregar_poligonos_neutros_estado_departamento(
             ],
             # El polígono del estado/departamento se mantiene seleccionable,
             # pero no muestra recuadro emergente al pasar el cursor.
+            # Usamos "none" en lugar de "skip" porque "skip" también bloquea
+            # eventos de selección/clic en Plotly.
             # El tooltip ejecutivo queda únicamente en las bolitas de sucursal.
-            hoverinfo="skip",
+            hoverinfo="none",
             hovertemplate=None,
         )
     )
@@ -4095,6 +4102,7 @@ def mostrar_mapa(valera_param: str):
             variable_tamano=variable_tamano,
             tipo_mapa=st.session_state.get("tipo_mapa_valeras", "Subdirección"),
             solo_ejecutivo=True,
+            conservar_tarjetas=bool(estado_sel),
         )
 
     with cols_ia_tipo_mapa[1]:
