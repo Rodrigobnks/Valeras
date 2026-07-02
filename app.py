@@ -1450,19 +1450,23 @@ def resolver_archivo_plazo_composicion() -> Path | None:
     """
     Busca el archivo que alimenta la lectura financiera del detalle por estado.
     Si existen varias versiones, usa la más reciente por fecha de modificación.
-    Además, dentro del archivo se filtrará el último Corte disponible.
+    La fecha/corte que se muestra en esta vista sale de la columna Corte de este archivo,
+    no de la fecha de corte de las demás visualizaciones.
     """
     candidatos = [
         ARCHIVO_PLAZO_COMPOSICION,
         BASE_DIR / "Plazo y composicion de dispersión.csv",
         BASE_DIR / "Plazo y composicion de dispersión(1).csv",
         BASE_DIR / "Plazo y composicion de dispersión(2).csv",
+        BASE_DIR / "Plazo y composicion de dispersión(3).csv",
         BASE_DIR / "Plazo y composición de dispersión.csv",
         BASE_DIR / "Plazo y composición de dispersión(1).csv",
         BASE_DIR / "Plazo y composición de dispersión(2).csv",
+        BASE_DIR / "Plazo y composición de dispersión(3).csv",
         BASE_DIR / "Plazo y composicion de dispersion.csv",
         BASE_DIR / "Plazo y composicion de dispersion(1).csv",
         BASE_DIR / "Plazo y composicion de dispersion(2).csv",
+        BASE_DIR / "Plazo y composicion de dispersion(3).csv",
     ]
 
     patrones = [
@@ -1553,24 +1557,44 @@ def extraer_fecha_corte(valor):
     return pd.to_datetime(texto, errors="coerce", dayfirst=True)
 
 
+
+def formatear_corte_plazo(valor) -> str:
+    """
+    Devuelve el corte como texto visible para la vista Plazo y composición.
+    Si viene como fecha, lo muestra dd/mm/aaaa. Si viene como texto, conserva el texto.
+    """
+    if pd.isna(valor):
+        return ""
+
+    texto = arreglar_mojibake(str(valor)).strip()
+    if not texto:
+        return ""
+
+    fecha = extraer_fecha_corte(texto)
+    if not pd.isna(fecha):
+        return pd.to_datetime(fecha).strftime("%d/%m/%Y")
+
+    return texto
+
+
 def filtrar_ultimo_corte_plazo(df: pd.DataFrame) -> pd.DataFrame:
     """
     Conserva únicamente el último dato real de la columna Corte.
 
-    Regla:
-    - Toma el último valor no vacío de la columna Corte dentro del archivo.
-    - Filtra toda la base a ese corte.
-    - No depende de la fecha de corte del tablero.
+    Esta vista tiene su propio corte porque se alimenta de una base distinta.
+    Por eso NO usa la fecha de corte del tablero principal.
     """
     df = df.copy()
 
     if "Corte" not in df.columns:
         df["Corte"] = ""
         df["Corte Fecha"] = pd.NaT
+        df["Corte Texto"] = ""
         return df
 
     df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
     df["Corte Fecha"] = df["Corte"].map(extraer_fecha_corte)
+    df["Corte Texto"] = df["Corte"].map(formatear_corte_plazo)
 
     cortes_en_orden = [c for c in df["Corte"].tolist() if str(c).strip()]
     if cortes_en_orden:
@@ -1642,6 +1666,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     if "Corte" not in df.columns:
         df["Corte"] = ""
     df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
+    df["Corte Texto"] = df["Corte"].map(formatear_corte_plazo)
 
     for col in ["Plazo", "Capital", "Interes", "Total", "Vales"]:
         df[col] = convertir_numero(df[col]).fillna(0)
@@ -1655,7 +1680,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     # El plazo se mantiene EXACTAMENTE como viene en el archivo.
     # Por eso se agrupa incluyendo Plazo y no se calcula promedio ni ponderado.
     agrupado = (
-        df.groupby(["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm", "Corte", "Plazo"], as_index=False)
+        df.groupby(["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm", "Corte", "Corte Texto", "Plazo"], as_index=False)
         .agg(
             Subdirección=("Subdirección", "first"),
             Zona=("Zona", "first"),
@@ -1681,6 +1706,7 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         df_suc[col] = 0
     df_suc["Corte"] = ""
+    df_suc["Corte Texto"] = ""
 
     ruta_plazo = resolver_archivo_plazo_composicion()
     if ruta_plazo is None:
@@ -1711,10 +1737,11 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
         "Vales",
         "Ganancia",
         "Corte",
+        "Corte Texto",
     ]
 
     df_suc_base = df_suc.drop(
-        columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia", "Corte"],
+        columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia", "Corte", "Corte Texto"],
         errors="ignore",
     )
 
@@ -1728,7 +1755,7 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
     faltantes = df_suc_match["Capital"].isna()
     if faltantes.any():
         df_fin_suc = (
-            df_fin.groupby(["__Sucursal_norm", "Corte", "Plazo"], as_index=False)
+            df_fin.groupby(["__Sucursal_norm", "Corte", "Corte Texto", "Plazo"], as_index=False)
             .agg(
                 Capital=("Capital", "sum"),
                 Interes=("Interes", "sum"),
@@ -1755,6 +1782,10 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
     if "Corte" not in df_suc_match.columns:
         df_suc_match["Corte"] = ""
     df_suc_match["Corte"] = df_suc_match["Corte"].fillna("").astype(str)
+
+    if "Corte Texto" not in df_suc_match.columns:
+        df_suc_match["Corte Texto"] = ""
+    df_suc_match["Corte Texto"] = df_suc_match["Corte Texto"].fillna("").astype(str)
 
     columnas_aux = [c for c in df_suc_match.columns if c.startswith("__") or c.endswith("_suc")]
     df_suc_match = df_suc_match.drop(columns=columnas_aux, errors="ignore")
@@ -4502,7 +4533,6 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
     tasa = (interes / capital * 100) if capital else 0
 
     # Monto Vale = Capital / Vales.
-    # Es el ticket promedio colocado por vale dentro del plazo seleccionado.
     monto_vale = (capital / vales) if vales else 0
 
     # El plazo NO se promedia. Se muestra exactamente el plazo que trae el archivo.
@@ -4510,8 +4540,11 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
     plazo_texto = plazo_display_desde_valores(df_tmp["Plazo"])
 
     corte = ""
-    if "Corte" in df_tmp.columns:
-        corte = next((c for c in df_tmp["Corte"].dropna().astype(str).unique().tolist() if c), "")
+    if "Corte Texto" in df_tmp.columns:
+        corte = next((c for c in df_tmp["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
+
+    if not corte and "Corte" in df_tmp.columns:
+        corte = next((formatear_corte_plazo(c) for c in df_tmp["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
 
     return {
         "Capital": capital,
@@ -4599,6 +4632,23 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     line-height: 1.3;
 }}
 
+.corte-plazo-badge {{
+    background: rgba(255,255,255,0.97);
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 14px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    color: {COLOR_TEXTO};
+    font-size: 14px;
+    font-weight: 800;
+    box-shadow: 0 8px 18px rgba(12, 33, 74, 0.06);
+}}
+
+.corte-plazo-badge span {{
+    color: {COLOR_PRIMARIO};
+    font-weight: 900;
+}}
+
 .plazo-kpi-note {{
     color: {COLOR_TEXTO};
     font-size: 11px;
@@ -4613,6 +4663,18 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     )
 
     with st.expander("Plazo", expanded=True):
+        corte_base = ""
+        if "Corte Texto" in df_base.columns:
+            corte_base = next((c for c in df_base["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
+        if not corte_base and "Corte" in df_base.columns:
+            corte_base = next((formatear_corte_plazo(c) for c in df_base["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
+
+        if corte_base:
+            st.markdown(
+                f"<div class='corte-plazo-badge'>Corte base Plazo y composición: <span>{corte_base}</span></div>",
+                unsafe_allow_html=True,
+            )
+
         cols = st.columns([1.22, 0.86, 0.98, 0.98, 0.82, 0.78, 0.72])
 
         with cols[0]:
@@ -4674,6 +4736,10 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
         df_plot["Corte"] = ""
     df_plot["Corte"] = df_plot["Corte"].fillna("").astype(str)
 
+    if "Corte Texto" not in df_plot.columns:
+        df_plot["Corte Texto"] = df_plot["Corte"].map(formatear_corte_plazo)
+    df_plot["Corte Texto"] = df_plot["Corte Texto"].fillna("").astype(str)
+
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         if col not in df_plot.columns:
             df_plot[col] = 0
@@ -4696,7 +4762,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                 Total=("Total", "sum"),
                 Ganancia=("Ganancia", "sum"),
                 Vales=("Vales", "sum"),
-                Corte=("Corte", "first"),
+                Corte=("Corte Texto", "first"),
                 Plazos_Unicos=("Plazo", lambda x: sorted(pd.to_numeric(x, errors="coerce").dropna().unique().tolist())),
             )
         )
@@ -4730,7 +4796,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                     if df_plot["Capital"].sum() else 0
                 ),
                 "Plazo Texto": plazo_display_desde_valores(df_plot["Plazo"]),
-                "Corte": next((c for c in df_plot["Corte"].dropna().astype(str).unique().tolist() if c), ""),
+                "Corte": next((c for c in df_plot["Corte Texto"].dropna().astype(str).unique().tolist() if c), ""),
             }]
         )
 
@@ -4854,12 +4920,14 @@ def construir_mapa_estado_plazo_composicion(
         return
 
     corte_actual = metricas_plazo.get("Corte", "")
-    if not corte_actual:
-        corte_actual = next((c for c in df_suc_filtrado.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
-    if not corte_actual:
-        corte_actual = next((c for c in df_suc.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
+    if not corte_actual and "Corte Texto" in df_suc_filtrado.columns:
+        corte_actual = next((c for c in df_suc_filtrado["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
+    if not corte_actual and "Corte" in df_suc_filtrado.columns:
+        corte_actual = next((formatear_corte_plazo(c) for c in df_suc_filtrado["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
+    if not corte_actual and "Corte Texto" in df_suc.columns:
+        corte_actual = next((c for c in df_suc["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
 
-    titulo_corte = corte_actual if corte_actual else fecha_texto
+    titulo_corte = f"Corte plazo {corte_actual}" if corte_actual else "Corte plazo no disponible"
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
     fig.update_layout(
