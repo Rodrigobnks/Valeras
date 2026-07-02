@@ -1459,14 +1459,17 @@ def resolver_archivo_plazo_composicion() -> Path | None:
         BASE_DIR / "Plazo y composicion de dispersión(1).csv",
         BASE_DIR / "Plazo y composicion de dispersión(2).csv",
         BASE_DIR / "Plazo y composicion de dispersión(3).csv",
+        BASE_DIR / "Plazo y composicion de dispersión(4).csv",
         BASE_DIR / "Plazo y composición de dispersión.csv",
         BASE_DIR / "Plazo y composición de dispersión(1).csv",
         BASE_DIR / "Plazo y composición de dispersión(2).csv",
         BASE_DIR / "Plazo y composición de dispersión(3).csv",
+        BASE_DIR / "Plazo y composición de dispersión(4).csv",
         BASE_DIR / "Plazo y composicion de dispersion.csv",
         BASE_DIR / "Plazo y composicion de dispersion(1).csv",
         BASE_DIR / "Plazo y composicion de dispersion(2).csv",
         BASE_DIR / "Plazo y composicion de dispersion(3).csv",
+        BASE_DIR / "Plazo y composicion de dispersion(4).csv",
     ]
 
     patrones = [
@@ -1575,6 +1578,44 @@ def formatear_corte_plazo(valor) -> str:
         return pd.to_datetime(fecha).strftime("%d/%m/%Y")
 
     return texto
+
+
+
+def obtener_corte_visible_plazo() -> str:
+    """
+    Lee directamente el archivo de Plazo y composición y devuelve el último Corte visible.
+    Esto evita que el corte se pierda por cruces de estructura, filtros de estado o cache de otras vistas.
+    """
+    ruta = resolver_archivo_plazo_composicion()
+    if ruta is None:
+        return ""
+
+    try:
+        df_raw = leer_csv_seguro(ruta)
+    except Exception:
+        return ""
+
+    col_corte = None
+    for col in df_raw.columns:
+        if limpiar_texto(col) == "CORTE":
+            col_corte = col
+            break
+
+    if col_corte is None:
+        return ""
+
+    serie = (
+        df_raw[col_corte]
+        .dropna()
+        .astype(str)
+        .map(lambda x: arreglar_mojibake(x).strip())
+    )
+    serie = serie[serie != ""]
+
+    if serie.empty:
+        return ""
+
+    return formatear_corte_plazo(serie.iloc[-1])
 
 
 def filtrar_ultimo_corte_plazo(df: pd.DataFrame) -> pd.DataFrame:
@@ -1786,6 +1827,12 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
     if "Corte Texto" not in df_suc_match.columns:
         df_suc_match["Corte Texto"] = ""
     df_suc_match["Corte Texto"] = df_suc_match["Corte Texto"].fillna("").astype(str)
+
+    corte_visible_fallback = obtener_corte_visible_plazo()
+    if corte_visible_fallback:
+        df_suc_match["Corte Texto"] = df_suc_match["Corte Texto"].replace("", corte_visible_fallback)
+        if "Corte" in df_suc_match.columns:
+            df_suc_match["Corte"] = df_suc_match["Corte"].replace("", corte_visible_fallback)
 
     columnas_aux = [c for c in df_suc_match.columns if c.startswith("__") or c.endswith("_suc")]
     df_suc_match = df_suc_match.drop(columns=columnas_aux, errors="ignore")
@@ -4546,6 +4593,9 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
     if not corte and "Corte" in df_tmp.columns:
         corte = next((formatear_corte_plazo(c) for c in df_tmp["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
 
+    if not corte:
+        corte = obtener_corte_visible_plazo()
+
     return {
         "Capital": capital,
         "Interes": interes,
@@ -4678,8 +4728,8 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     )
 
     with st.expander("Plazo", expanded=True):
-        corte_base = ""
-        if "Corte Texto" in df_base.columns:
+        corte_base = obtener_corte_visible_plazo()
+        if not corte_base and "Corte Texto" in df_base.columns:
             corte_base = next((c for c in df_base["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
         if not corte_base and "Corte" in df_base.columns:
             corte_base = next((formatear_corte_plazo(c) for c in df_base["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
@@ -4947,6 +4997,8 @@ def construir_mapa_estado_plazo_composicion(
         corte_actual = next((formatear_corte_plazo(c) for c in df_suc_filtrado["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
     if not corte_actual and "Corte Texto" in df_suc.columns:
         corte_actual = next((c for c in df_suc["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
+    if not corte_actual:
+        corte_actual = obtener_corte_visible_plazo()
 
     titulo_corte = f"Corte plazo {corte_actual}" if corte_actual else "Corte plazo no disponible"
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
