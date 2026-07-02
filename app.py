@@ -3600,9 +3600,9 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 }}
 
 .map-help-widget {{
-    position: absolute;
-    top: -54px;
-    left: 10px;
+    position: fixed;
+    top: 172px;
+    left: 18px;
     z-index: 9999;
     display: inline-block;
 }}
@@ -3640,6 +3640,7 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 
 .map-help-panel {{
     display: none;
+    margin-top: 8px;
     width: min(1120px, calc(100vw - 100px));
     max-width: calc(100vw - 100px);
     background: rgba(255,255,255,0.97);
@@ -4360,7 +4361,7 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "conviene revisarla con prioridad.<br><br>"
         "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
         "usa <b>Plazo y composición</b> para cambiar a esta lectura financiera por capital, interés, ganancia, tasa y plazo, "
-        "sin modificar la selección del estado ni las tablas inferiores."
+        "sin modificar la selección del estado ni las tablas inferiores. <br><br><b>Monto Vale:</b> se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
     )
 
 
@@ -4382,9 +4383,9 @@ def renderizar_guia_interaccion_mapa_financiero():
 }}
 
 .map-help-widget {{
-    position: absolute;
-    top: -54px;
-    left: 10px;
+    position: fixed;
+    top: 172px;
+    left: 18px;
     z-index: 9999;
     display: inline-block;
 }}
@@ -4422,6 +4423,7 @@ def renderizar_guia_interaccion_mapa_financiero():
 
 .map-help-panel {{
     display: none;
+    margin-top: 8px;
     width: min(1120px, calc(100vw - 100px));
     max-width: calc(100vw - 100px);
     background: rgba(255,255,255,0.97);
@@ -4475,6 +4477,24 @@ def formatear_plazo_opcion(valor) -> str:
     return f"{float(numero):,.1f} semanas"
 
 
+
+def plazo_display_desde_valores(valores) -> str:
+    serie = pd.to_numeric(pd.Series(valores), errors="coerce").dropna()
+
+    if serie.empty:
+        return ""
+
+    unicos = sorted(serie.unique().tolist())
+
+    if len(unicos) == 1:
+        valor = float(unicos[0])
+        if abs(valor - round(valor)) < 0.00001:
+            return f"{int(round(valor))} sem"
+        return f"{valor:,.1f} sem"
+
+    return "Varios"
+
+
 def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
     df_tmp = df_suc.copy()
 
@@ -4493,8 +4513,14 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
         ganancia = total - capital
 
     tasa = (interes / capital * 100) if capital else 0
-    plazo = ((df_tmp["Plazo"] * df_tmp["Capital"]).sum() / capital) if capital else 0
+
+    # Monto Vale = Capital / Vales.
+    # Es el ticket promedio colocado por vale dentro del plazo seleccionado.
     monto_vale = (capital / vales) if vales else 0
+
+    # El plazo NO se promedia. Se muestra exactamente el plazo que trae el archivo.
+    # Si la vista está en "Todos los plazos" y hay más de uno, se muestra "Varios".
+    plazo_texto = plazo_display_desde_valores(df_tmp["Plazo"])
 
     corte = ""
     if "Corte" in df_tmp.columns:
@@ -4506,12 +4532,11 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
         "Total": total,
         "Ganancia": ganancia,
         "Tasa de Ganancia": tasa,
-        "Plazo": plazo,
+        "Plazo": plazo_texto,
         "Vales": vales,
         "Monto Vale": monto_vale,
         "Corte": corte,
     }
-
 
 def renderizar_tarjeta_kpi_plazo(titulo: str, valor: str):
     st.markdown(
@@ -4536,7 +4561,6 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     plazos = (
         df_base.loc[df_base["Capital"].fillna(0) > 0, "Plazo"]
         .dropna()
-        .round(1)
         .sort_values()
         .unique()
         .tolist()
@@ -4581,13 +4605,22 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     opacity: 0.72;
     margin-top: -4px;
 }}
+
+.plazo-kpi-note {{
+    color: {COLOR_TEXTO};
+    font-size: 12px;
+    font-weight: 650;
+    opacity: 0.70;
+    margin-top: 8px;
+    line-height: 1.35;
+}}
 </style>
 """,
         unsafe_allow_html=True,
     )
 
     with st.expander("Plazo", expanded=True):
-        cols = st.columns([1.15, 1, 1, 1, 1, 1])
+        cols = st.columns([1.15, 1, 1, 1, 1, 1, 1])
 
         with cols[0]:
             plazo_sel = st.selectbox(
@@ -4606,13 +4639,17 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
             plazo_texto = "Todos"
         else:
             plazo_num = float(pd.to_numeric(plazo_sel, errors="coerce"))
-            df_filtrado = df_base[df_base["Plazo"].round(1) == round(plazo_num, 1)].copy()
+            df_filtrado = df_base[df_base["Plazo"] == plazo_num].copy()
             plazo_texto = formatear_plazo_opcion(plazo_sel)
 
         metricas = calcular_metricas_plazo(df_filtrado)
 
         with cols[1]:
             renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
+            st.markdown(
+                "<div class='plazo-kpi-note'>Capital / Vales</div>",
+                unsafe_allow_html=True,
+            )
         with cols[2]:
             renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
         with cols[3]:
@@ -4620,20 +4657,20 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
         with cols[4]:
             renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
         with cols[5]:
+            renderizar_tarjeta_kpi_plazo("Plazo", metricas["Plazo"])
+        with cols[6]:
             renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
 
     return df_filtrado, plazo_texto, metricas
 
-
 def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go.Figure:
     """
-    Construye un treemap financiero con la misma lógica visual del mapa de estructura:
-    jerarquía operativa y lectura ejecutiva por tamaño/color.
+    Construye un treemap financiero con la misma lógica visual del mapa de estructura.
 
     Jerarquía: Estado → Subdirección → Zona → Sucursal.
     Tamaño: Capital.
     Color: Tasa de ganancia.
-    Tooltip/texto: Capital, Interés, Total, Ganancia, Tasa, Plazo ponderado, Vales y Corte.
+    Plazo: se muestra exactamente como viene en el archivo. No se promedia.
     """
     df_plot = df_suc.copy()
 
@@ -4660,8 +4697,6 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
             "Revisa que la base Plazo y composicion de dispersión tenga sucursales que coincidan con la estructura."
         )
 
-    df_plot["__Plazo_x_Capital"] = df_plot["Plazo"] * df_plot["Capital"]
-
     def agg_level(cols: list[str]) -> pd.DataFrame:
         g = (
             df_plot.groupby(cols, as_index=False)
@@ -4672,21 +4707,25 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                 Ganancia=("Ganancia", "sum"),
                 Vales=("Vales", "sum"),
                 Corte=("Corte", "first"),
-                Plazo_x_Capital=("__Plazo_x_Capital", "sum"),
+                Plazos_Unicos=("Plazo", lambda x: sorted(pd.to_numeric(x, errors="coerce").dropna().unique().tolist())),
             )
-        )
-        g["Plazo"] = g.apply(
-            lambda r: r["Plazo_x_Capital"] / r["Capital"] if pd.to_numeric(r["Capital"], errors="coerce") else 0,
-            axis=1,
         )
         g["Tasa de Ganancia"] = g.apply(
             lambda r: r["Interes"] / r["Capital"] * 100 if pd.to_numeric(r["Capital"], errors="coerce") else 0,
             axis=1,
         )
-        return g.drop(columns=["Plazo_x_Capital"])
+        g["Plazo Texto"] = g["Plazos_Unicos"].map(plazo_display_desde_valores)
+        return g.drop(columns=["Plazos_Unicos"])
 
     estado_label = str(estado)
-    total = agg_level(["Estado"]) if "Estado" in df_plot.columns else pd.DataFrame()
+
+    if "Estado" in df_plot.columns:
+        total = agg_level(["Estado"])
+        if not total.empty:
+            total["Estado"] = estado_label
+    else:
+        total = pd.DataFrame()
+
     if total.empty:
         total = pd.DataFrame(
             [{
@@ -4696,19 +4735,14 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                 "Total": df_plot["Total"].sum(),
                 "Ganancia": df_plot["Ganancia"].sum(),
                 "Vales": df_plot["Vales"].sum(),
-                "Plazo": (
-                    df_plot["__Plazo_x_Capital"].sum() / df_plot["Capital"].sum()
-                    if df_plot["Capital"].sum() else 0
-                ),
                 "Tasa de Ganancia": (
                     df_plot["Interes"].sum() / df_plot["Capital"].sum() * 100
                     if df_plot["Capital"].sum() else 0
                 ),
+                "Plazo Texto": plazo_display_desde_valores(df_plot["Plazo"]),
                 "Corte": next((c for c in df_plot["Corte"].dropna().astype(str).unique().tolist() if c), ""),
             }]
         )
-    else:
-        total["Estado"] = estado_label
 
     sub = agg_level(["Subdirección"])
     zona = agg_level(["Subdirección", "Zona"])
@@ -4727,7 +4761,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
         total_val = float(pd.to_numeric(row.get("Total", 0), errors="coerce") or 0)
         ganancia = float(pd.to_numeric(row.get("Ganancia", 0), errors="coerce") or 0)
         tasa = float(pd.to_numeric(row.get("Tasa de Ganancia", 0), errors="coerce") or 0)
-        plazo = float(pd.to_numeric(row.get("Plazo", 0), errors="coerce") or 0)
+        plazo_texto = str(row.get("Plazo Texto", "") or "")
         vales = float(pd.to_numeric(row.get("Vales", 0), errors="coerce") or 0)
         corte = str(row.get("Corte", "") or "")
 
@@ -4736,7 +4770,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
         parents.append(parent)
         values.append(capital)
         colors.append(tasa)
-        custom.append([capital, interes, total_val, ganancia, tasa, plazo, vales, corte])
+        custom.append([capital, interes, total_val, ganancia, tasa, plazo_texto, vales, corte])
 
     add_node(f"estado::{estado_label}", estado_label, "", total.iloc[0])
 
@@ -4775,7 +4809,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                 "<b>%{label}</b><br>"
                 "$%{customdata[0]:,.0f}<br>"
                 "%{customdata[4]:,.1f}%<br>"
-                "%{customdata[5]:,.1f} sem"
+                "%{customdata[5]}"
             ),
             textfont=dict(size=16),
             customdata=custom,
@@ -4786,8 +4820,9 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
                 "Total: $%{customdata[2]:,.0f}<br>"
                 "Ganancia: $%{customdata[3]:,.0f}<br>"
                 "Tasa de ganancia: %{customdata[4]:,.2f}%<br>"
-                "Plazo ponderado: %{customdata[5]:,.1f} semanas<br>"
+                "Plazo: %{customdata[5]}<br>"
                 "Vales: %{customdata[6]:,.0f}<br>"
+                "Monto Vale: $%{customdata[0]/customdata[6]:,.0f}<br>"
                 "Corte: %{customdata[7]}"
                 "<extra></extra>"
             ),
