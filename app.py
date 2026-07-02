@@ -1555,8 +1555,12 @@ def extraer_fecha_corte(valor):
 
 def filtrar_ultimo_corte_plazo(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Conserva únicamente el último Corte dentro de la base de plazo y composición.
-    Si la columna Corte no existe o no se puede interpretar, deja la base completa.
+    Conserva únicamente el último dato real de la columna Corte.
+
+    Regla:
+    - Toma el último valor no vacío de la columna Corte dentro del archivo.
+    - Filtra toda la base a ese corte.
+    - No depende de la fecha de corte del tablero.
     """
     df = df.copy()
 
@@ -1568,14 +1572,10 @@ def filtrar_ultimo_corte_plazo(df: pd.DataFrame) -> pd.DataFrame:
     df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
     df["Corte Fecha"] = df["Corte"].map(extraer_fecha_corte)
 
-    fechas_validas = df["Corte Fecha"].dropna()
-    if not fechas_validas.empty:
-        ultimo_corte = fechas_validas.max()
-        return df[df["Corte Fecha"] == ultimo_corte].copy()
-
-    cortes_validos = [c for c in df["Corte"].dropna().astype(str).str.strip().unique().tolist() if c]
-    if cortes_validos:
-        return df[df["Corte"] == cortes_validos[-1]].copy()
+    cortes_en_orden = [c for c in df["Corte"].tolist() if str(c).strip()]
+    if cortes_en_orden:
+        ultimo_corte = cortes_en_orden[-1]
+        return df[df["Corte"] == ultimo_corte].copy()
 
     return df
 
@@ -1652,33 +1652,26 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
         df[f"__{col}_norm"] = df[col].map(normalizar_llave)
     df["__Sucursal_norm"] = df["Sucursal"].map(normalizar_llave_sucursal)
 
-    df["__Plazo_x_Capital"] = df["Plazo"] * df["Capital"]
-
+    # El plazo se mantiene EXACTAMENTE como viene en el archivo.
+    # Por eso se agrupa incluyendo Plazo y no se calcula promedio ni ponderado.
     agrupado = (
-        df.groupby(["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm"], as_index=False)
+        df.groupby(["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm", "Corte", "Plazo"], as_index=False)
         .agg(
             Subdirección=("Subdirección", "first"),
             Zona=("Zona", "first"),
             Sucursal=("Sucursal", "first"),
-            Corte=("Corte", "first"),
             Capital=("Capital", "sum"),
             Interes=("Interes", "sum"),
             Total=("Total", "sum"),
             Vales=("Vales", "sum"),
-            Plazo_x_Capital=("__Plazo_x_Capital", "sum"),
         )
     )
 
-    agrupado["Plazo"] = agrupado.apply(
-        lambda r: r["Plazo_x_Capital"] / r["Capital"] if pd.to_numeric(r["Capital"], errors="coerce") else 0,
-        axis=1,
-    )
     agrupado["Tasa de Ganancia"] = agrupado.apply(
         lambda r: r["Interes"] / r["Capital"] * 100 if pd.to_numeric(r["Capital"], errors="coerce") else 0,
         axis=1,
     )
     agrupado["Ganancia"] = agrupado["Total"] - agrupado["Capital"]
-    agrupado = agrupado.drop(columns=["Plazo_x_Capital"])
 
     return agrupado
 
@@ -1720,58 +1713,53 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
         "Corte",
     ]
 
-    df_suc = df_suc.drop(
+    df_suc_base = df_suc.drop(
         columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia", "Corte"],
         errors="ignore",
     )
-    df_suc = df_suc.merge(df_fin[cols_fin], on=["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm"], how="left")
 
-    # Fallback por sucursal cuando la subdirección o zona no coinciden exactamente.
-    faltantes = df_suc["Capital"].isna()
+    df_suc_match = df_suc_base.merge(
+        df_fin[cols_fin],
+        on=["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm"],
+        how="left",
+    )
+
+    # Fallback por sucursal cuando subdirección o zona no coinciden exactamente.
+    faltantes = df_suc_match["Capital"].isna()
     if faltantes.any():
         df_fin_suc = (
-            df_fin.groupby("__Sucursal_norm", as_index=False)
+            df_fin.groupby(["__Sucursal_norm", "Corte", "Plazo"], as_index=False)
             .agg(
-                Capital_suc=("Capital", "sum"),
-                Interes_suc=("Interes", "sum"),
-                Total_suc=("Total", "sum"),
-                Vales_suc=("Vales", "sum"),
-                Ganancia_suc=("Ganancia", "sum"),
-                Corte_suc=("Corte", "first"),
+                Capital=("Capital", "sum"),
+                Interes=("Interes", "sum"),
+                Total=("Total", "sum"),
+                Vales=("Vales", "sum"),
+                Ganancia=("Ganancia", "sum"),
             )
         )
-        plazo_tmp = df_fin.copy()
-        plazo_tmp["__Plazo_x_Capital"] = plazo_tmp["Plazo"] * plazo_tmp["Capital"]
-        plazo_suc = plazo_tmp.groupby("__Sucursal_norm", as_index=False).agg(
-            __Plazo_x_Capital=("__Plazo_x_Capital", "sum")
-        )
-        df_fin_suc = df_fin_suc.merge(plazo_suc, on="__Sucursal_norm", how="left")
-        df_fin_suc["Plazo_suc"] = df_fin_suc.apply(
-            lambda r: r["__Plazo_x_Capital"] / r["Capital_suc"] if r["Capital_suc"] else 0,
-            axis=1,
-        )
-        df_fin_suc["Tasa de Ganancia_suc"] = df_fin_suc.apply(
-            lambda r: r["Interes_suc"] / r["Capital_suc"] * 100 if r["Capital_suc"] else 0,
+        df_fin_suc["Tasa de Ganancia"] = df_fin_suc.apply(
+            lambda r: r["Interes"] / r["Capital"] * 100 if r["Capital"] else 0,
             axis=1,
         )
 
-        df_suc = df_suc.merge(df_fin_suc, on="__Sucursal_norm", how="left")
-        for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
-            df_suc[col] = df_suc[col].fillna(df_suc.get(f"{col}_suc", 0))
-        if "Corte_suc" in df_suc.columns:
-            df_suc["Corte"] = df_suc["Corte"].fillna(df_suc["Corte_suc"])
+        df_faltantes = df_suc_base.loc[faltantes].merge(df_fin_suc, on="__Sucursal_norm", how="left")
+
+        df_suc_match = pd.concat(
+            [df_suc_match.loc[~faltantes].copy(), df_faltantes.copy()],
+            ignore_index=True,
+        )
 
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
-        df_suc[col] = pd.to_numeric(df_suc[col], errors="coerce").fillna(0)
+        df_suc_match[col] = pd.to_numeric(df_suc_match[col], errors="coerce").fillna(0)
 
-    if "Corte" not in df_suc.columns:
-        df_suc["Corte"] = ""
-    df_suc["Corte"] = df_suc["Corte"].fillna("").astype(str)
+    if "Corte" not in df_suc_match.columns:
+        df_suc_match["Corte"] = ""
+    df_suc_match["Corte"] = df_suc_match["Corte"].fillna("").astype(str)
 
-    columnas_aux = [c for c in df_suc.columns if c.startswith("__") or c.endswith("_suc")]
-    df_suc = df_suc.drop(columns=columnas_aux, errors="ignore")
+    columnas_aux = [c for c in df_suc_match.columns if c.startswith("__") or c.endswith("_suc")]
+    df_suc_match = df_suc_match.drop(columns=columnas_aux, errors="ignore")
 
-    return df_suc
+    return df_suc_match
 
 def formato_moneda(valor) -> str:
     numero = pd.to_numeric(valor, errors="coerce")
@@ -3601,7 +3589,7 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 
 .map-help-widget {{
     position: fixed;
-    top: 172px;
+    top: 86px;
     left: 18px;
     z-index: 9999;
     display: inline-block;
@@ -4384,7 +4372,7 @@ def renderizar_guia_interaccion_mapa_financiero():
 
 .map-help-widget {{
     position: fixed;
-    top: 172px;
+    top: 86px;
     left: 18px;
     z-index: 9999;
     display: inline-block;
@@ -4471,12 +4459,11 @@ def formatear_plazo_opcion(valor) -> str:
     if pd.isna(numero):
         return str(valor)
 
-    if abs(float(numero) - int(float(numero))) < 0.00001:
-        return f"{int(float(numero))} semanas"
+    numero = float(numero)
+    if abs(numero - round(numero)) < 0.00001:
+        return f"{int(round(numero))} semanas"
 
-    return f"{float(numero):,.1f} semanas"
-
-
+    return f"{numero:,.1f} semanas"
 
 def plazo_display_desde_valores(valores) -> str:
     serie = pd.to_numeric(pd.Series(valores), errors="coerce").dropna()
@@ -4574,45 +4561,51 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
 .kpi-plazo-card {{
     background: rgba(255,255,255,0.96);
     border: 1px solid {COLOR_BORDE};
-    border-radius: 18px;
-    padding: 14px 18px;
-    min-height: 96px;
-    box-shadow: 0 12px 28px rgba(12, 33, 74, 0.08);
+    border-radius: 16px;
+    padding: 12px 14px;
+    min-height: 82px;
+    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
     display: flex;
     flex-direction: column;
     justify-content: center;
+    overflow: hidden;
 }}
 
 .kpi-plazo-label {{
     color: {COLOR_TEXTO};
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
     opacity: 0.86;
-    margin-bottom: 8px;
+    margin-bottom: 7px;
+    white-space: nowrap;
 }}
 
 .kpi-plazo-value {{
     color: {COLOR_PRIMARIO};
-    font-size: 34px;
+    font-size: clamp(18px, 1.45vw, 30px);
     font-weight: 900;
-    line-height: 1;
+    line-height: 1.04;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 
 .plazo-filter-note {{
     color: {COLOR_TEXTO};
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     opacity: 0.72;
-    margin-top: -4px;
+    margin-top: 8px;
+    line-height: 1.3;
 }}
 
 .plazo-kpi-note {{
     color: {COLOR_TEXTO};
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 650;
     opacity: 0.70;
-    margin-top: 8px;
-    line-height: 1.35;
+    margin-top: 6px;
+    line-height: 1.25;
 }}
 </style>
 """,
@@ -4620,7 +4613,7 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     )
 
     with st.expander("Plazo", expanded=True):
-        cols = st.columns([1.15, 1, 1, 1, 1, 1, 1])
+        cols = st.columns([1.22, 0.86, 0.98, 0.98, 0.82, 0.78, 0.72])
 
         with cols[0]:
             plazo_sel = st.selectbox(
@@ -4646,10 +4639,7 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
 
         with cols[1]:
             renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
-            st.markdown(
-                "<div class='plazo-kpi-note'>Capital / Vales</div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<div class='plazo-kpi-note'>Capital / Vales</div>", unsafe_allow_html=True)
         with cols[2]:
             renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
         with cols[3]:
@@ -4866,6 +4856,9 @@ def construir_mapa_estado_plazo_composicion(
     corte_actual = metricas_plazo.get("Corte", "")
     if not corte_actual:
         corte_actual = next((c for c in df_suc_filtrado.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
+    if not corte_actual:
+        corte_actual = next((c for c in df_suc.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
+
     titulo_corte = corte_actual if corte_actual else fecha_texto
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
