@@ -4432,7 +4432,7 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "conviene revisarla con prioridad.<br><br>"
         "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
         "usa <b>Plazo y composición</b> para cambiar a esta lectura financiera por capital, interés, ganancia, tasa y plazo, "
-        "sin modificar la selección del estado ni las tablas inferiores. Al dar clic en un bloque del treemap, las tarjetas se recalculan para ese estado, subdirección, zona o sucursal seleccionada.<br><br><b>Corte:</b> esta vista toma el último dato real de la columna <b>Corte</b> del archivo Plazo y composición; no usa la fecha de corte de las demás visualizaciones.<br><br><b>Cálculo de tarjetas:</b> Capital, Interés, Total, Ganancia y Vales son sumas del corte y plazo seleccionados. La Tasa de ganancia se recalcula como <b>Interés / Capital</b>. Monto Vale se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
+        "sin modificar la selección del estado ni las tablas inferiores. Al dar clic en un bloque del treemap, las tarjetas se recalculan para ese estado, subdirección, zona o sucursal seleccionada. El cuadro emergente del cursor queda desactivado para que la interacción principal sea el clic sobre el bloque.<br><br><b>Corte:</b> esta vista toma el último dato real de la columna <b>Corte</b> del archivo Plazo y composición; no usa la fecha de corte de las demás visualizaciones.<br><br><b>Cálculo de tarjetas:</b> Capital, Interés, Total, Ganancia y Vales son sumas del corte y plazo seleccionados. La Tasa de ganancia se recalcula como <b>Interés / Capital</b>. Monto Vale se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
     )
 
 
@@ -4911,7 +4911,7 @@ def renderizar_selector_plazo_y_kpis(
             renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
 
         st.markdown(
-            f"<div class='treemap-selection-note'>Tarjetas calculadas sobre: {etiqueta_nodo_treemap(selected_node_id)}</div>",
+            f"<div class='treemap-selection-note'>Tarjetas calculadas por clic sobre: {etiqueta_nodo_treemap(selected_node_id)}</div>",
             unsafe_allow_html=True,
         )
 
@@ -5071,19 +5071,8 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
             ),
             textfont=dict(size=16),
             customdata=custom,
-            hovertemplate=(
-                "<b>%{label}</b><br><br>"
-                "Capital: $%{customdata[0]:,.0f}<br>"
-                "Interés: $%{customdata[1]:,.0f}<br>"
-                "Total: $%{customdata[2]:,.0f}<br>"
-                "Ganancia: $%{customdata[3]:,.0f}<br>"
-                "Tasa de ganancia: %{customdata[4]:,.2f}%<br>"
-                "Plazo: %{customdata[5]}<br>"
-                "Vales: %{customdata[6]:,.0f}<br>"
-                "Monto Vale: $%{customdata[0]/customdata[6]:,.0f}<br>"
-                "Corte: %{customdata[7]}"
-                "<extra></extra>"
-            ),
+            hoverinfo="none",
+            hovertemplate=None,
             maxdepth=4,
         )
     )
@@ -5096,9 +5085,8 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
     Renderiza el treemap y, si está disponible streamlit-plotly-events,
     captura el clic sobre los bloques para recalcular las tarjetas.
 
-    Nota técnica:
-    go.Treemap no acepta propiedades selectedpoints/selected/unselected.
-    Por eso el clic se captura con streamlit_plotly_events cuando está instalado.
+    El hover queda desactivado para que no aparezca el cuadro emergente:
+    el comportamiento esperado es dar clic en el bloque y mover las tarjetas.
     """
     chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
 
@@ -5114,14 +5102,39 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
                 key=chart_key,
             )
 
+            nuevo_node_id = None
+
             if eventos:
-                punto = eventos[0]
-                customdata = punto.get("customdata") if isinstance(punto, dict) else None
-                if isinstance(customdata, (list, tuple)) and len(customdata) >= 9:
-                    nuevo_node_id = str(customdata[8])
-                    if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
-                        st.session_state[selection_key] = nuevo_node_id
-                        st.rerun()
+                punto = eventos[0] if isinstance(eventos, list) else eventos
+
+                if isinstance(punto, dict):
+                    # Algunos eventos de treemap sí entregan el id directo.
+                    for llave in ["id", "point_id", "pointId"]:
+                        valor = punto.get(llave)
+                        if valor:
+                            nuevo_node_id = str(valor)
+                            break
+
+                    # Otros eventos entregan customdata.
+                    if not nuevo_node_id:
+                        customdata = punto.get("customdata")
+                        if isinstance(customdata, (list, tuple)) and len(customdata) >= 9:
+                            nuevo_node_id = str(customdata[8])
+
+                    # Fallback más estable: usar pointNumber/pointIndex contra fig.data[0].ids.
+                    if not nuevo_node_id:
+                        idx_punto = punto.get("pointNumber", punto.get("pointIndex", punto.get("point_number")))
+                        try:
+                            idx_punto = int(idx_punto)
+                            ids_fig = list(fig.data[0].ids) if len(fig.data) else []
+                            if 0 <= idx_punto < len(ids_fig):
+                                nuevo_node_id = str(ids_fig[idx_punto])
+                        except Exception:
+                            pass
+
+                if nuevo_node_id:
+                    st.session_state[selection_key] = nuevo_node_id
+                    st.rerun()
 
             return st.session_state.get(selection_key)
 
@@ -5134,6 +5147,7 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
 
     st.plotly_chart(fig, use_container_width=True)
     return st.session_state.get(selection_key)
+
 
 
 def construir_mapa_estado_plazo_composicion(
