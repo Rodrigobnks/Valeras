@@ -4380,7 +4380,7 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "conviene revisarla con prioridad.<br><br>"
         "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
         "usa <b>Plazo y composición</b> para cambiar a esta lectura financiera por capital, interés, ganancia, tasa y plazo, "
-        "sin modificar la selección del estado ni las tablas inferiores. <br><br><b>Monto Vale:</b> se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
+        "sin modificar la selección del estado ni las tablas inferiores. <br><br><b>Corte:</b> esta vista toma el último dato real de la columna <b>Corte</b> del archivo Plazo y composición; no usa la fecha de corte de las demás visualizaciones.<br><br><b>Cálculo de tarjetas:</b> Capital, Interés, Total, Ganancia y Vales son sumas del corte y plazo seleccionados. La Tasa de ganancia se recalcula como <b>Interés / Capital</b>. Monto Vale se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
     )
 
 
@@ -4632,23 +4632,6 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     line-height: 1.3;
 }}
 
-.corte-plazo-badge {{
-    background: rgba(255,255,255,0.97);
-    border: 1px solid {COLOR_BORDE};
-    border-radius: 14px;
-    padding: 10px 14px;
-    margin-bottom: 12px;
-    color: {COLOR_TEXTO};
-    font-size: 14px;
-    font-weight: 800;
-    box-shadow: 0 8px 18px rgba(12, 33, 74, 0.06);
-}}
-
-.corte-plazo-badge span {{
-    color: {COLOR_PRIMARIO};
-    font-weight: 900;
-}}
-
 .plazo-kpi-note {{
     color: {COLOR_TEXTO};
     font-size: 11px;
@@ -4656,6 +4639,38 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     opacity: 0.70;
     margin-top: 6px;
     line-height: 1.25;
+}}
+
+.corte-plazo-card {{
+    background: rgba(255,255,255,0.96);
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 16px;
+    padding: 12px 14px;
+    min-height: 82px;
+    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+}}
+
+.corte-plazo-label {{
+    color: {COLOR_TEXTO};
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0.86;
+    margin-bottom: 7px;
+    white-space: nowrap;
+}}
+
+.corte-plazo-value {{
+    color: {COLOR_PRIMARIO};
+    font-size: clamp(18px, 1.25vw, 26px);
+    font-weight: 900;
+    line-height: 1.04;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 </style>
 """,
@@ -4669,13 +4684,7 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
         if not corte_base and "Corte" in df_base.columns:
             corte_base = next((formatear_corte_plazo(c) for c in df_base["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
 
-        if corte_base:
-            st.markdown(
-                f"<div class='corte-plazo-badge'>Corte base Plazo y composición: <span>{corte_base}</span></div>",
-                unsafe_allow_html=True,
-            )
-
-        cols = st.columns([1.22, 0.86, 0.98, 0.98, 0.82, 0.78, 0.72])
+        cols = st.columns([1.22, 0.78, 0.90, 0.86, 0.98, 0.98, 0.82, 0.72])
 
         with cols[0]:
             plazo_sel = st.selectbox(
@@ -4700,17 +4709,29 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
         metricas = calcular_metricas_plazo(df_filtrado)
 
         with cols[1]:
+            renderizar_tarjeta_kpi_plazo("Plazo", metricas["Plazo"])
+
+        with cols[2]:
+            st.markdown(
+                f"""
+<div class="corte-plazo-card">
+    <div class="corte-plazo-label">Corte</div>
+    <div class="corte-plazo-value">{corte_base if corte_base else "Sin corte"}</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+        with cols[3]:
             renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
             st.markdown("<div class='plazo-kpi-note'>Capital / Vales</div>", unsafe_allow_html=True)
-        with cols[2]:
-            renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
-        with cols[3]:
-            renderizar_tarjeta_kpi_plazo("Interés", formato_moneda(metricas["Interes"]))
         with cols[4]:
-            renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
+            renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
         with cols[5]:
-            renderizar_tarjeta_kpi_plazo("Plazo", metricas["Plazo"])
+            renderizar_tarjeta_kpi_plazo("Interés", formato_moneda(metricas["Interes"]))
         with cols[6]:
+            renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
+        with cols[7]:
             renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
 
     return df_filtrado, plazo_texto, metricas
