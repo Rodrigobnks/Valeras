@@ -3601,8 +3601,8 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 
 .map-help-widget {{
     position: absolute;
-    top: 76px;
-    left: 18px;
+    top: -54px;
+    left: 10px;
     z-index: 9999;
     display: inline-block;
 }}
@@ -4353,7 +4353,9 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "<b>Color del bloque:</b> representa la <b>tasa de ganancia</b>. Los tonos bajos señalan menor rentabilidad relativa; "
         "los tonos altos señalan mayor rentabilidad relativa. Así puedes detectar estructuras grandes con baja rentabilidad "
         "o estructuras pequeñas con buen desempeño.<br><br>"
-        "<b>Plazo:</b> se muestra como <b>plazo ponderado por capital</b>, por lo que refleja mejor la exposición real del dinero "
+        "<b>Plazo:</b> arriba del treemap tienes una tarjeta desplegable para mover la gráfica por plazo. "
+        "Al elegir un plazo, el treemap y los KPIs se recalculan únicamente con ese plazo seleccionado. "
+        "El plazo se muestra como <b>plazo ponderado por capital</b>, por lo que refleja mejor la exposición real del dinero "
         "que un promedio simple. Una sucursal con plazo alto recupera capital más lento; si además tiene baja tasa de ganancia, "
         "conviene revisarla con prioridad.<br><br>"
         "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
@@ -4381,8 +4383,8 @@ def renderizar_guia_interaccion_mapa_financiero():
 
 .map-help-widget {{
     position: absolute;
-    top: 76px;
-    left: 18px;
+    top: -54px;
+    left: 10px;
     z-index: 9999;
     display: inline-block;
 }}
@@ -4456,6 +4458,171 @@ def renderizar_guia_interaccion_mapa_financiero():
 """,
         unsafe_allow_html=True,
     )
+
+
+
+def formatear_plazo_opcion(valor) -> str:
+    if valor == "Todos":
+        return "Todos los plazos"
+
+    numero = pd.to_numeric(valor, errors="coerce")
+    if pd.isna(numero):
+        return str(valor)
+
+    if abs(float(numero) - int(float(numero))) < 0.00001:
+        return f"{int(float(numero))} semanas"
+
+    return f"{float(numero):,.1f} semanas"
+
+
+def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
+    df_tmp = df_suc.copy()
+
+    for col in ["Capital", "Interes", "Total", "Ganancia", "Tasa de Ganancia", "Plazo", "Vales"]:
+        if col not in df_tmp.columns:
+            df_tmp[col] = 0
+        df_tmp[col] = pd.to_numeric(df_tmp[col], errors="coerce").fillna(0)
+
+    capital = float(df_tmp["Capital"].sum())
+    interes = float(df_tmp["Interes"].sum())
+    total = float(df_tmp["Total"].sum())
+    ganancia = float(df_tmp["Ganancia"].sum())
+    vales = float(df_tmp["Vales"].sum())
+
+    if ganancia == 0 and total > 0 and capital > 0:
+        ganancia = total - capital
+
+    tasa = (interes / capital * 100) if capital else 0
+    plazo = ((df_tmp["Plazo"] * df_tmp["Capital"]).sum() / capital) if capital else 0
+    monto_vale = (capital / vales) if vales else 0
+
+    corte = ""
+    if "Corte" in df_tmp.columns:
+        corte = next((c for c in df_tmp["Corte"].dropna().astype(str).unique().tolist() if c), "")
+
+    return {
+        "Capital": capital,
+        "Interes": interes,
+        "Total": total,
+        "Ganancia": ganancia,
+        "Tasa de Ganancia": tasa,
+        "Plazo": plazo,
+        "Vales": vales,
+        "Monto Vale": monto_vale,
+        "Corte": corte,
+    }
+
+
+def renderizar_tarjeta_kpi_plazo(titulo: str, valor: str):
+    st.markdown(
+        f"""
+<div class="kpi-plazo-card">
+    <div class="kpi-plazo-label">{titulo}</div>
+    <div class="kpi-plazo-value">{valor}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple[pd.DataFrame, str, dict]:
+    df_base = df_suc.copy()
+
+    if "Plazo" not in df_base.columns:
+        df_base["Plazo"] = 0
+
+    df_base["Plazo"] = pd.to_numeric(df_base["Plazo"], errors="coerce").fillna(0)
+
+    plazos = (
+        df_base.loc[df_base["Capital"].fillna(0) > 0, "Plazo"]
+        .dropna()
+        .round(1)
+        .sort_values()
+        .unique()
+        .tolist()
+    )
+
+    opciones = ["Todos"] + plazos
+
+    st.markdown(
+        f"""
+<style>
+.kpi-plazo-card {{
+    background: rgba(255,255,255,0.96);
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 18px;
+    padding: 14px 18px;
+    min-height: 96px;
+    box-shadow: 0 12px 28px rgba(12, 33, 74, 0.08);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}}
+
+.kpi-plazo-label {{
+    color: {COLOR_TEXTO};
+    font-size: 15px;
+    font-weight: 600;
+    opacity: 0.86;
+    margin-bottom: 8px;
+}}
+
+.kpi-plazo-value {{
+    color: {COLOR_PRIMARIO};
+    font-size: 34px;
+    font-weight: 900;
+    line-height: 1;
+}}
+
+.plazo-filter-note {{
+    color: {COLOR_TEXTO};
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0.72;
+    margin-top: -4px;
+}}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Plazo", expanded=True):
+        cols = st.columns([1.15, 1, 1, 1, 1, 1])
+
+        with cols[0]:
+            plazo_sel = st.selectbox(
+                "Mover gráfica por plazo",
+                opciones,
+                format_func=formatear_plazo_opcion,
+                key=f"selector_plazo_composicion_{limpiar_texto(estado)}",
+            )
+            st.markdown(
+                "<div class='plazo-filter-note'>El treemap y los KPIs se recalculan con el plazo seleccionado.</div>",
+                unsafe_allow_html=True,
+            )
+
+        if plazo_sel == "Todos":
+            df_filtrado = df_base.copy()
+            plazo_texto = "Todos"
+        else:
+            plazo_num = float(pd.to_numeric(plazo_sel, errors="coerce"))
+            df_filtrado = df_base[df_base["Plazo"].round(1) == round(plazo_num, 1)].copy()
+            plazo_texto = formatear_plazo_opcion(plazo_sel)
+
+        metricas = calcular_metricas_plazo(df_filtrado)
+
+        with cols[1]:
+            renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
+        with cols[2]:
+            renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
+        with cols[3]:
+            renderizar_tarjeta_kpi_plazo("Interés", formato_moneda(metricas["Interes"]))
+        with cols[4]:
+            renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
+        with cols[5]:
+            renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
+
+    return df_filtrado, plazo_texto, metricas
 
 
 def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go.Figure:
@@ -4649,17 +4816,26 @@ def construir_mapa_estado_plazo_composicion(
         st.warning("No hay sucursales para este estado/departamento.")
         return
 
+    df_suc_filtrado, plazo_texto, metricas_plazo = renderizar_selector_plazo_y_kpis(df_suc, estado)
+
+    if df_suc_filtrado.empty:
+        st.warning("No hay datos para el plazo seleccionado.")
+        return
+
     try:
-        fig = construir_treemap_plazo_composicion(df_suc, estado)
+        fig = construir_treemap_plazo_composicion(df_suc_filtrado, estado)
     except Exception as e:
         st.warning(str(e))
         return
 
-    corte_actual = next((c for c in df_suc.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
+    corte_actual = metricas_plazo.get("Corte", "")
+    if not corte_actual:
+        corte_actual = next((c for c in df_suc_filtrado.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
     titulo_corte = corte_actual if corte_actual else fecha_texto
+    titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
     fig.update_layout(
-        title=f"{estado} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}",
+        title=f"{estado} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}{titulo_plazo}",
         height=720,
         margin=dict(l=10, r=10, t=70, b=10),
         paper_bgcolor="rgba(255,255,255,0)",
