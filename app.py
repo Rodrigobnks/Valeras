@@ -4427,7 +4427,7 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "conviene revisarla con prioridad.<br><br>"
         "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
         "usa <b>Plazo y composición</b> para cambiar a esta lectura financiera por capital, interés, ganancia, tasa y plazo, "
-        "sin modificar la selección del estado ni las tablas inferiores. <br><br><b>Corte:</b> esta vista toma el último dato real de la columna <b>Corte</b> del archivo Plazo y composición; no usa la fecha de corte de las demás visualizaciones.<br><br><b>Cálculo de tarjetas:</b> Capital, Interés, Total, Ganancia y Vales son sumas del corte y plazo seleccionados. La Tasa de ganancia se recalcula como <b>Interés / Capital</b>. Monto Vale se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
+        "sin modificar la selección del estado ni las tablas inferiores. Al dar clic en un bloque del treemap, las tarjetas se recalculan para ese estado, subdirección, zona o sucursal seleccionada.<br><br><b>Corte:</b> esta vista toma el último dato real de la columna <b>Corte</b> del archivo Plazo y composición; no usa la fecha de corte de las demás visualizaciones.<br><br><b>Cálculo de tarjetas:</b> Capital, Interés, Total, Ganancia y Vales son sumas del corte y plazo seleccionados. La Tasa de ganancia se recalcula como <b>Interés / Capital</b>. Monto Vale se calcula como <b>Capital / Vales</b>, es decir, el ticket promedio colocado por vale dentro del plazo seleccionado."
     )
 
 
@@ -4620,7 +4620,115 @@ def renderizar_tarjeta_kpi_plazo(titulo: str, valor: str):
     )
 
 
-def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple[pd.DataFrame, str, dict]:
+
+def filtrar_df_por_nodo_treemap(df: pd.DataFrame, node_id: str | None) -> pd.DataFrame:
+    """
+    Filtra la base financiera según el bloque seleccionado en el treemap.
+    Los ids se construyen como:
+    - estado::<estado>
+    - sub::<subdirección>
+    - zona::<subdirección>::<zona>
+    - suc::<subdirección>::<zona>::<sucursal>
+    """
+    if not node_id:
+        return df.copy()
+
+    partes = str(node_id).split("::")
+    if not partes:
+        return df.copy()
+
+    tipo = partes[0]
+    filtrado = df.copy()
+
+    if tipo == "estado":
+        return filtrado
+
+    if tipo == "sub" and len(partes) >= 2 and "Subdirección" in filtrado.columns:
+        return filtrado[filtrado["Subdirección"].astype(str) == partes[1]].copy()
+
+    if tipo == "zona" and len(partes) >= 3:
+        if "Subdirección" in filtrado.columns:
+            filtrado = filtrado[filtrado["Subdirección"].astype(str) == partes[1]].copy()
+        if "Zona" in filtrado.columns:
+            filtrado = filtrado[filtrado["Zona"].astype(str) == partes[2]].copy()
+        return filtrado
+
+    if tipo == "suc" and len(partes) >= 4:
+        if "Subdirección" in filtrado.columns:
+            filtrado = filtrado[filtrado["Subdirección"].astype(str) == partes[1]].copy()
+        if "Zona" in filtrado.columns:
+            filtrado = filtrado[filtrado["Zona"].astype(str) == partes[2]].copy()
+        if "Sucursal" in filtrado.columns:
+            filtrado = filtrado[filtrado["Sucursal"].astype(str) == partes[3]].copy()
+        return filtrado
+
+    return df.copy()
+
+
+def etiqueta_nodo_treemap(node_id: str | None) -> str:
+    if not node_id:
+        return "Total visible"
+
+    partes = str(node_id).split("::")
+    if not partes:
+        return "Total visible"
+
+    tipo = partes[0]
+
+    if tipo == "estado" and len(partes) >= 2:
+        return partes[1]
+    if tipo == "sub" and len(partes) >= 2:
+        return f"Subdirección: {partes[1]}"
+    if tipo == "zona" and len(partes) >= 3:
+        return f"Zona: {partes[2]}"
+    if tipo == "suc" and len(partes) >= 4:
+        return f"Sucursal: {partes[3]}"
+
+    return "Total visible"
+
+
+def extraer_node_id_evento_plotly(evento) -> str | None:
+    """
+    Extrae el id del bloque seleccionado desde la respuesta de st.plotly_chart.
+    Funciona con el dict de selección de Streamlit y tolera variaciones de estructura.
+    """
+    if not evento:
+        return None
+
+    try:
+        seleccion = evento.get("selection", {}) if isinstance(evento, dict) else getattr(evento, "selection", {})
+        puntos = seleccion.get("points", []) if isinstance(seleccion, dict) else getattr(seleccion, "points", [])
+    except Exception:
+        return None
+
+    if not puntos:
+        return None
+
+    punto = puntos[0]
+
+    if isinstance(punto, dict):
+        for llave in ["id", "point_id", "pointId"]:
+            valor = punto.get(llave)
+            if valor:
+                return str(valor)
+
+        customdata = punto.get("customdata")
+        if isinstance(customdata, (list, tuple)) and len(customdata) >= 9:
+            return str(customdata[8])
+
+    for llave in ["id", "point_id", "pointId"]:
+        valor = getattr(punto, llave, None)
+        if valor:
+            return str(valor)
+
+    return None
+
+
+def renderizar_selector_plazo_y_kpis(
+    df_suc: pd.DataFrame,
+    estado: str,
+    selected_node_id: str | None = None,
+) -> tuple[pd.DataFrame, str, dict]:
     df_base = df_suc.copy()
 
     if "Plazo" not in df_base.columns:
@@ -4722,6 +4830,14 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
     overflow: hidden;
     text-overflow: ellipsis;
 }}
+
+.treemap-selection-note {{
+    margin-top: 7px;
+    color: {COLOR_PRIMARIO};
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.25;
+}}
 </style>
 """,
         unsafe_allow_html=True,
@@ -4744,7 +4860,7 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
                 key=f"selector_plazo_composicion_{limpiar_texto(estado)}",
             )
             st.markdown(
-                "<div class='plazo-filter-note'>El treemap y los KPIs se recalculan con el plazo seleccionado.</div>",
+                "<div class='plazo-filter-note'>El treemap se recalcula con el plazo seleccionado. Las tarjetas también responden al plazo y al bloque que selecciones en el treemap.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -4756,7 +4872,12 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
             df_filtrado = df_base[df_base["Plazo"] == plazo_num].copy()
             plazo_texto = formatear_plazo_opcion(plazo_sel)
 
-        metricas = calcular_metricas_plazo(df_filtrado)
+        df_metricas = filtrar_df_por_nodo_treemap(df_filtrado, selected_node_id)
+        if df_metricas.empty:
+            df_metricas = df_filtrado.copy()
+            selected_node_id = None
+
+        metricas = calcular_metricas_plazo(df_metricas)
 
         with cols[1]:
             renderizar_tarjeta_kpi_plazo("Plazo", metricas["Plazo"])
@@ -4784,9 +4905,14 @@ def renderizar_selector_plazo_y_kpis(df_suc: pd.DataFrame, estado: str) -> tuple
         with cols[7]:
             renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
 
+        st.markdown(
+            f"<div class='treemap-selection-note'>Tarjetas calculadas sobre: {etiqueta_nodo_treemap(selected_node_id)}</div>",
+            unsafe_allow_html=True,
+        )
+
     return df_filtrado, plazo_texto, metricas
 
-def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go.Figure:
+def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selected_node_id: str | None = None) -> go.Figure:
     """
     Construye un treemap financiero con la misma lógica visual del mapa de estructura.
 
@@ -4897,7 +5023,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
         parents.append(parent)
         values.append(capital)
         colors.append(tasa)
-        custom.append([capital, interes, total_val, ganancia, tasa, plazo_texto, vales, corte])
+        custom.append([capital, interes, total_val, ganancia, tasa, plazo_texto, vales, corte, node_id])
 
     add_node(f"estado::{estado_label}", estado_label, "", total.iloc[0])
 
@@ -4914,6 +5040,10 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
         zona_id = f"zona::{r['Subdirección']}::{r['Zona']}"
         suc_id = f"suc::{r['Subdirección']}::{r['Zona']}::{r['Sucursal']}"
         add_node(suc_id, r["Sucursal"], zona_id, r)
+
+    selectedpoints = []
+    if selected_node_id:
+        selectedpoints = [i for i, node_id in enumerate(ids) if str(node_id) == str(selected_node_id)]
 
     fig = go.Figure(
         go.Treemap(
@@ -4940,6 +5070,9 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go
             ),
             textfont=dict(size=16),
             customdata=custom,
+            selectedpoints=selectedpoints if selectedpoints else None,
+            selected=dict(marker=dict(line=dict(width=4, color=COLOR_OSCURO))),
+            unselected=dict(marker=dict(opacity=0.82)),
             hovertemplate=(
                 "<b>%{label}</b><br><br>"
                 "Capital: $%{customdata[0]:,.0f}<br>"
@@ -4978,14 +5111,21 @@ def construir_mapa_estado_plazo_composicion(
         st.warning("No hay sucursales para este estado/departamento.")
         return
 
-    df_suc_filtrado, plazo_texto, metricas_plazo = renderizar_selector_plazo_y_kpis(df_suc, estado)
+    selection_key = f"treemap_plazo_selected_{limpiar_texto(estado)}"
+    selected_node_id = st.session_state.get(selection_key)
+
+    df_suc_filtrado, plazo_texto, metricas_plazo = renderizar_selector_plazo_y_kpis(
+        df_suc,
+        estado,
+        selected_node_id=selected_node_id,
+    )
 
     if df_suc_filtrado.empty:
         st.warning("No hay datos para el plazo seleccionado.")
         return
 
     try:
-        fig = construir_treemap_plazo_composicion(df_suc_filtrado, estado)
+        fig = construir_treemap_plazo_composicion(df_suc_filtrado, estado, selected_node_id=selected_node_id)
     except Exception as e:
         st.warning(str(e))
         return
@@ -5013,7 +5153,23 @@ def construir_mapa_estado_plazo_composicion(
     )
 
     renderizar_guia_interaccion_mapa_financiero()
-    st.plotly_chart(fig, use_container_width=True)
+    chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
+    try:
+        evento = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=chart_key,
+            on_select="rerun",
+            selection_mode="points",
+        )
+    except TypeError:
+        evento = None
+        st.plotly_chart(fig, use_container_width=True)
+
+    nuevo_node_id = extraer_node_id_evento_plotly(evento)
+    if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
+        st.session_state[selection_key] = nuevo_node_id
+        st.rerun()
 
 # ======================================================
 # PÁGINA DE MAPA
