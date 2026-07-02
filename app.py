@@ -1449,20 +1449,21 @@ def recalcular_canje_promedio(df: pd.DataFrame) -> pd.DataFrame:
 def resolver_archivo_plazo_composicion() -> Path | None:
     """
     Busca el archivo que alimenta la lectura financiera del detalle por estado.
-    Acepta nombres con o sin acento para que funcione en local y en Streamlit Cloud.
+    Si existen varias versiones, usa la más reciente por fecha de modificación.
+    Además, dentro del archivo se filtrará el último Corte disponible.
     """
     candidatos = [
         ARCHIVO_PLAZO_COMPOSICION,
+        BASE_DIR / "Plazo y composicion de dispersión.csv",
         BASE_DIR / "Plazo y composicion de dispersión(1).csv",
+        BASE_DIR / "Plazo y composicion de dispersión(2).csv",
         BASE_DIR / "Plazo y composición de dispersión.csv",
         BASE_DIR / "Plazo y composición de dispersión(1).csv",
+        BASE_DIR / "Plazo y composición de dispersión(2).csv",
         BASE_DIR / "Plazo y composicion de dispersion.csv",
         BASE_DIR / "Plazo y composicion de dispersion(1).csv",
+        BASE_DIR / "Plazo y composicion de dispersion(2).csv",
     ]
-
-    for ruta in candidatos:
-        if ruta.exists():
-            return ruta
 
     patrones = [
         "*Plazo*composicion*dispers*.csv",
@@ -1471,13 +1472,25 @@ def resolver_archivo_plazo_composicion() -> Path | None:
         "*plazo*composición*dispers*.csv",
     ]
 
+    encontrados = []
+    vistos = set()
+
+    for ruta in candidatos:
+        if ruta.exists() and ruta not in vistos:
+            encontrados.append(ruta)
+            vistos.add(ruta)
+
     for patron in patrones:
         for ruta in BASE_DIR.glob(patron):
-            if ruta.exists():
-                return ruta
+            if ruta.exists() and ruta not in vistos:
+                encontrados.append(ruta)
+                vistos.add(ruta)
 
-    return None
+    if not encontrados:
+        return None
 
+    encontrados = sorted(encontrados, key=lambda p: p.stat().st_mtime, reverse=True)
+    return encontrados[0]
 
 def convertir_porcentaje(serie: pd.Series) -> pd.Series:
     if serie.dtype == object:
@@ -1493,6 +1506,79 @@ def convertir_porcentaje(serie: pd.Series) -> pd.Series:
     return num.where(num > 1, num * 100)
 
 
+
+def extraer_fecha_corte(valor):
+    """
+    Convierte textos como 'Corte 02 julio 2026' a fecha.
+    También soporta formatos tipo 02/07/2026, 2026-07-02 o fechas reconocibles por pandas.
+    """
+    if pd.isna(valor):
+        return pd.NaT
+
+    texto = arreglar_mojibake(str(valor)).strip()
+    if not texto:
+        return pd.NaT
+
+    meses = {
+        "ENERO": 1,
+        "FEBRERO": 2,
+        "MARZO": 3,
+        "ABRIL": 4,
+        "MAYO": 5,
+        "JUNIO": 6,
+        "JULIO": 7,
+        "AGOSTO": 8,
+        "SEPTIEMBRE": 9,
+        "SETIEMBRE": 9,
+        "OCTUBRE": 10,
+        "NOVIEMBRE": 11,
+        "DICIEMBRE": 12,
+    }
+
+    texto_norm = limpiar_texto(texto)
+    match = re.search(
+        r"(\d{1,2})\s+("
+        r"ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|SETIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE"
+        r")\s+(\d{4})",
+        texto_norm,
+    )
+
+    if match:
+        dia = int(match.group(1))
+        mes = meses.get(match.group(2))
+        anio = int(match.group(3))
+        if mes:
+            return pd.Timestamp(year=anio, month=mes, day=dia)
+
+    return pd.to_datetime(texto, errors="coerce", dayfirst=True)
+
+
+def filtrar_ultimo_corte_plazo(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Conserva únicamente el último Corte dentro de la base de plazo y composición.
+    Si la columna Corte no existe o no se puede interpretar, deja la base completa.
+    """
+    df = df.copy()
+
+    if "Corte" not in df.columns:
+        df["Corte"] = ""
+        df["Corte Fecha"] = pd.NaT
+        return df
+
+    df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
+    df["Corte Fecha"] = df["Corte"].map(extraer_fecha_corte)
+
+    fechas_validas = df["Corte Fecha"].dropna()
+    if not fechas_validas.empty:
+        ultimo_corte = fechas_validas.max()
+        return df[df["Corte Fecha"] == ultimo_corte].copy()
+
+    cortes_validos = [c for c in df["Corte"].dropna().astype(str).str.strip().unique().tolist() if c]
+    if cortes_validos:
+        return df[df["Corte"] == cortes_validos[-1]].copy()
+
+    return df
+
 @st.cache_data(show_spinner=False)
 def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     df = leer_csv_seguro(Path(path))
@@ -1506,6 +1592,8 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             renombres[col] = "Zona"
         elif col_norm == "SUCURSAL":
             renombres[col] = "Sucursal"
+        elif col_norm == "CORTE":
+            renombres[col] = "Corte"
         elif col_norm == "PLAZO":
             renombres[col] = "Plazo"
         elif col_norm == "CAPITAL":
@@ -1540,11 +1628,20 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             + ", ".join(faltantes)
         )
 
-    df = df[columnas_requeridas].copy()
+    columnas_uso = columnas_requeridas.copy()
+    if "Corte" in df.columns:
+        columnas_uso = ["Corte"] + columnas_uso
+
+    df = df[columnas_uso].copy()
+    df = filtrar_ultimo_corte_plazo(df)
 
     for col in ["Subdirección", "Zona", "Sucursal"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip().replace("", "Sin dato")
         df[col] = df[col].map(lambda x: arreglar_mojibake(x) if isinstance(x, str) else x)
+
+    if "Corte" not in df.columns:
+        df["Corte"] = ""
+    df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
 
     for col in ["Plazo", "Capital", "Interes", "Total", "Vales"]:
         df[col] = convertir_numero(df[col]).fillna(0)
@@ -1563,6 +1660,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             Subdirección=("Subdirección", "first"),
             Zona=("Zona", "first"),
             Sucursal=("Sucursal", "first"),
+            Corte=("Corte", "first"),
             Capital=("Capital", "sum"),
             Interes=("Interes", "sum"),
             Total=("Total", "sum"),
@@ -1584,12 +1682,12 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
 
     return agrupado
 
-
 def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.DataFrame:
     df_suc = preparar_sucursales_para_mapa(df_estado).copy()
 
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         df_suc[col] = 0
+    df_suc["Corte"] = ""
 
     ruta_plazo = resolver_archivo_plazo_composicion()
     if ruta_plazo is None:
@@ -1619,9 +1717,13 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
         "Plazo",
         "Vales",
         "Ganancia",
+        "Corte",
     ]
 
-    df_suc = df_suc.drop(columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"], errors="ignore")
+    df_suc = df_suc.drop(
+        columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia", "Corte"],
+        errors="ignore",
+    )
     df_suc = df_suc.merge(df_fin[cols_fin], on=["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm"], how="left")
 
     # Fallback por sucursal cuando la subdirección o zona no coinciden exactamente.
@@ -1635,12 +1737,14 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
                 Total_suc=("Total", "sum"),
                 Vales_suc=("Vales", "sum"),
                 Ganancia_suc=("Ganancia", "sum"),
-                Plazo_x_Capital_suc=("Capital", "sum"),
+                Corte_suc=("Corte", "first"),
             )
         )
         plazo_tmp = df_fin.copy()
         plazo_tmp["__Plazo_x_Capital"] = plazo_tmp["Plazo"] * plazo_tmp["Capital"]
-        plazo_suc = plazo_tmp.groupby("__Sucursal_norm", as_index=False).agg(__Plazo_x_Capital=("__Plazo_x_Capital", "sum"))
+        plazo_suc = plazo_tmp.groupby("__Sucursal_norm", as_index=False).agg(
+            __Plazo_x_Capital=("__Plazo_x_Capital", "sum")
+        )
         df_fin_suc = df_fin_suc.merge(plazo_suc, on="__Sucursal_norm", how="left")
         df_fin_suc["Plazo_suc"] = df_fin_suc.apply(
             lambda r: r["__Plazo_x_Capital"] / r["Capital_suc"] if r["Capital_suc"] else 0,
@@ -1650,12 +1754,19 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
             lambda r: r["Interes_suc"] / r["Capital_suc"] * 100 if r["Capital_suc"] else 0,
             axis=1,
         )
+
         df_suc = df_suc.merge(df_fin_suc, on="__Sucursal_norm", how="left")
         for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
             df_suc[col] = df_suc[col].fillna(df_suc.get(f"{col}_suc", 0))
+        if "Corte_suc" in df_suc.columns:
+            df_suc["Corte"] = df_suc["Corte"].fillna(df_suc["Corte_suc"])
 
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         df_suc[col] = pd.to_numeric(df_suc[col], errors="coerce").fillna(0)
+
+    if "Corte" not in df_suc.columns:
+        df_suc["Corte"] = ""
+    df_suc["Corte"] = df_suc["Corte"].fillna("").astype(str)
 
     columnas_aux = [c for c in df_suc.columns if c.startswith("__") or c.endswith("_suc")]
     df_suc = df_suc.drop(columns=columnas_aux, errors="ignore")
@@ -4232,14 +4343,22 @@ def texto_guia_interaccion_mapa_financiero() -> str:
     return (
         "<b>Guía ejecutiva del mapa financiero</b><br>"
         "Estás viendo el detalle por estado en modo <b>Plazo y composición</b>. "
-        "La división municipal se conserva como referencia territorial y las bolitas muestran las sucursales que existen en la estructura.<br><br>"
-        "<b>Cómo leerlo:</b> el tamaño de la bolita representa el <b>capital</b> asociado a la sucursal; "
-        "el color representa la <b>tasa de ganancia</b>. Los tonos bajos indican menor rentabilidad relativa y los tonos altos mayor rentabilidad relativa. "
-        "Al pasar el cursor sobre una sucursal verás capital, interés, total, ganancia, tasa de ganancia, plazo ponderado y vales.<br><br>"
-        "<b>Plazo:</b> se calcula como plazo ponderado por capital, por lo que refleja mejor la exposición real del dinero que un promedio simple. "
-        "Una sucursal con plazo alto recupera el capital más lento; si además tiene baja tasa de ganancia, conviene revisarla con prioridad.<br><br>"
-        "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener la lectura operativa original por subdirección, canjes o dispersado; "
-        "usa <b>Plazo y composición</b> para analizar capital, interés, ganancia, tasa y plazo sin cambiar la selección del estado ni las tablas inferiores."
+        "Esta vista ya no usa bolitas: usa un <b>treemap jerárquico</b>, como el mapa de estructura, "
+        "para leer la composición financiera dentro del estado seleccionado.<br><br>"
+        "<b>Jerarquía:</b> Estado → Subdirección → Zona → Sucursal. "
+        "Cada bloque se agrupa dentro de su estructura operativa, permitiendo identificar rápidamente "
+        "dónde se concentra el capital, qué zonas pesan más y qué sucursales aportan más volumen.<br><br>"
+        "<b>Tamaño del bloque:</b> representa el <b>capital</b>. Un bloque más grande significa mayor concentración "
+        "de capital en esa parte de la estructura.<br><br>"
+        "<b>Color del bloque:</b> representa la <b>tasa de ganancia</b>. Los tonos bajos señalan menor rentabilidad relativa; "
+        "los tonos altos señalan mayor rentabilidad relativa. Así puedes detectar estructuras grandes con baja rentabilidad "
+        "o estructuras pequeñas con buen desempeño.<br><br>"
+        "<b>Plazo:</b> se muestra como <b>plazo ponderado por capital</b>, por lo que refleja mejor la exposición real del dinero "
+        "que un promedio simple. Una sucursal con plazo alto recupera capital más lento; si además tiene baja tasa de ganancia, "
+        "conviene revisarla con prioridad.<br><br>"
+        "<b>Switch de detalle:</b> usa <b>Estructura</b> para mantener el mapa territorial original con división municipal y sucursales; "
+        "usa <b>Plazo y composición</b> para cambiar a esta lectura financiera por capital, interés, ganancia, tasa y plazo, "
+        "sin modificar la selección del estado ni las tablas inferiores."
     )
 
 
@@ -4339,93 +4458,177 @@ def renderizar_guia_interaccion_mapa_financiero():
     )
 
 
-def agregar_burbujas_financieras_sucursales(fig: go.Figure, df_suc: pd.DataFrame):
-    if df_suc.empty:
-        return
+def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str) -> go.Figure:
+    """
+    Construye un treemap financiero con la misma lógica visual del mapa de estructura:
+    jerarquía operativa y lectura ejecutiva por tamaño/color.
 
+    Jerarquía: Estado → Subdirección → Zona → Sucursal.
+    Tamaño: Capital.
+    Color: Tasa de ganancia.
+    Tooltip/texto: Capital, Interés, Total, Ganancia, Tasa, Plazo ponderado, Vales y Corte.
+    """
     df_plot = df_suc.copy()
+
+    for col in ["Subdirección", "Zona", "Sucursal"]:
+        if col not in df_plot.columns:
+            df_plot[col] = "Sin dato"
+        df_plot[col] = df_plot[col].fillna("Sin dato").astype(str).str.strip()
+        df_plot[col] = df_plot[col].replace("", "Sin dato")
+
+    if "Corte" not in df_plot.columns:
+        df_plot["Corte"] = ""
+    df_plot["Corte"] = df_plot["Corte"].fillna("").astype(str)
+
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         if col not in df_plot.columns:
             df_plot[col] = 0
         df_plot[col] = pd.to_numeric(df_plot[col], errors="coerce").fillna(0)
 
-    max_capital = df_plot["Capital"].max()
-    if max_capital <= 0:
-        max_capital = max(df_plot["Vales"].max(), 1)
-        size_col = "Vales"
-        titulo_tamano = "Vales"
+    df_plot = df_plot[df_plot["Capital"] > 0].copy()
+
+    if df_plot.empty:
+        raise ValueError(
+            "No hay capital con datos de plazo y composición para las sucursales de este estado. "
+            "Revisa que la base Plazo y composicion de dispersión tenga sucursales que coincidan con la estructura."
+        )
+
+    df_plot["__Plazo_x_Capital"] = df_plot["Plazo"] * df_plot["Capital"]
+
+    def agg_level(cols: list[str]) -> pd.DataFrame:
+        g = (
+            df_plot.groupby(cols, as_index=False)
+            .agg(
+                Capital=("Capital", "sum"),
+                Interes=("Interes", "sum"),
+                Total=("Total", "sum"),
+                Ganancia=("Ganancia", "sum"),
+                Vales=("Vales", "sum"),
+                Corte=("Corte", "first"),
+                Plazo_x_Capital=("__Plazo_x_Capital", "sum"),
+            )
+        )
+        g["Plazo"] = g.apply(
+            lambda r: r["Plazo_x_Capital"] / r["Capital"] if pd.to_numeric(r["Capital"], errors="coerce") else 0,
+            axis=1,
+        )
+        g["Tasa de Ganancia"] = g.apply(
+            lambda r: r["Interes"] / r["Capital"] * 100 if pd.to_numeric(r["Capital"], errors="coerce") else 0,
+            axis=1,
+        )
+        return g.drop(columns=["Plazo_x_Capital"])
+
+    estado_label = str(estado)
+    total = agg_level(["Estado"]) if "Estado" in df_plot.columns else pd.DataFrame()
+    if total.empty:
+        total = pd.DataFrame(
+            [{
+                "Estado": estado_label,
+                "Capital": df_plot["Capital"].sum(),
+                "Interes": df_plot["Interes"].sum(),
+                "Total": df_plot["Total"].sum(),
+                "Ganancia": df_plot["Ganancia"].sum(),
+                "Vales": df_plot["Vales"].sum(),
+                "Plazo": (
+                    df_plot["__Plazo_x_Capital"].sum() / df_plot["Capital"].sum()
+                    if df_plot["Capital"].sum() else 0
+                ),
+                "Tasa de Ganancia": (
+                    df_plot["Interes"].sum() / df_plot["Capital"].sum() * 100
+                    if df_plot["Capital"].sum() else 0
+                ),
+                "Corte": next((c for c in df_plot["Corte"].dropna().astype(str).unique().tolist() if c), ""),
+            }]
+        )
     else:
-        size_col = "Capital"
-        titulo_tamano = "Capital"
+        total["Estado"] = estado_label
 
-    sizeref = max(float(max_capital), 1) / 55
+    sub = agg_level(["Subdirección"])
+    zona = agg_level(["Subdirección", "Zona"])
+    suc = agg_level(["Subdirección", "Zona", "Sucursal"])
 
-    custom_cols = [
-        "Estado",
-        "Subdirección",
-        "Zona",
-        "Capital",
-        "Interes",
-        "Total",
-        "Ganancia",
-        "Tasa de Ganancia",
-        "Plazo",
-        "Vales",
-        "Calidad de Cartera",
-        "Distribuidoras Totales",
-    ]
+    ids = []
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    custom = []
 
-    for col in custom_cols:
-        if col not in df_plot.columns:
-            df_plot[col] = 0 if col not in ["Estado", "Subdirección", "Zona"] else ""
+    def add_node(node_id: str, label: str, parent: str, row: pd.Series):
+        capital = float(pd.to_numeric(row.get("Capital", 0), errors="coerce") or 0)
+        interes = float(pd.to_numeric(row.get("Interes", 0), errors="coerce") or 0)
+        total_val = float(pd.to_numeric(row.get("Total", 0), errors="coerce") or 0)
+        ganancia = float(pd.to_numeric(row.get("Ganancia", 0), errors="coerce") or 0)
+        tasa = float(pd.to_numeric(row.get("Tasa de Ganancia", 0), errors="coerce") or 0)
+        plazo = float(pd.to_numeric(row.get("Plazo", 0), errors="coerce") or 0)
+        vales = float(pd.to_numeric(row.get("Vales", 0), errors="coerce") or 0)
+        corte = str(row.get("Corte", "") or "")
 
-    hover = (
-        "<b>%{text}</b><br>"
-        "Estado: %{customdata[0]}<br>"
-        "Subdirección: %{customdata[1]}<br>"
-        "Zona: %{customdata[2]}<br><br>"
-        "<b>Plazo y composición</b><br>"
-        "Capital: $%{customdata[3]:,.0f}<br>"
-        "Interés: $%{customdata[4]:,.0f}<br>"
-        "Total: $%{customdata[5]:,.0f}<br>"
-        "Ganancia: $%{customdata[6]:,.0f}<br>"
-        "Tasa de ganancia: %{customdata[7]:,.2f}%<br>"
-        "Plazo ponderado: %{customdata[8]:,.1f} semanas<br>"
-        "Vales: %{customdata[9]:,.0f}<br><br>"
-        "<b>Referencia operativa</b><br>"
-        "Calidad de cartera: %{customdata[10]:,.2f}%<br>"
-        "Distribuidoras totales: %{customdata[11]:,.0f}"
-        "<extra></extra>"
-    )
+        ids.append(node_id)
+        labels.append(str(label))
+        parents.append(parent)
+        values.append(capital)
+        colors.append(tasa)
+        custom.append([capital, interes, total_val, ganancia, tasa, plazo, vales, corte])
 
-    fig.add_trace(
-        go.Scattergeo(
-            lat=df_plot["Latitud"],
-            lon=df_plot["Longitud"],
-            mode="markers",
+    add_node(f"estado::{estado_label}", estado_label, "", total.iloc[0])
+
+    for _, r in sub.iterrows():
+        sub_id = f"sub::{r['Subdirección']}"
+        add_node(sub_id, r["Subdirección"], f"estado::{estado_label}", r)
+
+    for _, r in zona.iterrows():
+        sub_id = f"sub::{r['Subdirección']}"
+        zona_id = f"zona::{r['Subdirección']}::{r['Zona']}"
+        add_node(zona_id, r["Zona"], sub_id, r)
+
+    for _, r in suc.iterrows():
+        zona_id = f"zona::{r['Subdirección']}::{r['Zona']}"
+        suc_id = f"suc::{r['Subdirección']}::{r['Zona']}::{r['Sucursal']}"
+        add_node(suc_id, r["Sucursal"], zona_id, r)
+
+    fig = go.Figure(
+        go.Treemap(
+            ids=ids,
+            labels=labels,
+            parents=parents,
+            values=values,
+            branchvalues="total",
             marker=dict(
-                size=pd.to_numeric(df_plot[size_col], errors="coerce").fillna(0),
-                sizemode="area",
-                sizeref=sizeref,
-                sizemin=9,
-                color=pd.to_numeric(df_plot["Tasa de Ganancia"], errors="coerce").fillna(0),
+                colors=colors,
                 colorscale=[
                     [0.0, "#D73027"],
                     [0.5, "#FEE08B"],
                     [1.0, "#1A9850"],
                 ],
-                showscale=True,
                 colorbar=dict(title="Tasa ganancia"),
-                line=dict(width=1.15, color=COLOR_LINEA_MAPA_65),
-                opacity=0.93,
+                line=dict(width=1.5, color="rgba(255,255,255,0.65)"),
             ),
-            name=f"{titulo_tamano} por sucursal",
-            text=df_plot["Sucursal"],
-            customdata=df_plot[custom_cols],
-            hovertemplate=hover,
+            texttemplate=(
+                "<b>%{label}</b><br>"
+                "$%{customdata[0]:,.0f}<br>"
+                "%{customdata[4]:,.1f}%<br>"
+                "%{customdata[5]:,.1f} sem"
+            ),
+            textfont=dict(size=16),
+            customdata=custom,
+            hovertemplate=(
+                "<b>%{label}</b><br><br>"
+                "Capital: $%{customdata[0]:,.0f}<br>"
+                "Interés: $%{customdata[1]:,.0f}<br>"
+                "Total: $%{customdata[2]:,.0f}<br>"
+                "Ganancia: $%{customdata[3]:,.0f}<br>"
+                "Tasa de ganancia: %{customdata[4]:,.2f}%<br>"
+                "Plazo ponderado: %{customdata[5]:,.1f} semanas<br>"
+                "Vales: %{customdata[6]:,.0f}<br>"
+                "Corte: %{customdata[7]}"
+                "<extra></extra>"
+            ),
+            maxdepth=4,
         )
     )
 
+    return fig
 
 def construir_mapa_estado_plazo_composicion(
     df: pd.DataFrame,
@@ -4443,90 +4646,27 @@ def construir_mapa_estado_plazo_composicion(
     df_suc = preparar_sucursales_financieras_para_mapa(df_estado)
 
     if df_suc.empty:
-        st.warning("No hay sucursales con coordenadas para este estado/departamento.")
+        st.warning("No hay sucursales para este estado/departamento.")
         return
 
-    fig = go.Figure()
-    titulo_division = "División política"
+    try:
+        fig = construir_treemap_plazo_composicion(df_suc, estado)
+    except Exception as e:
+        st.warning(str(e))
+        return
 
-    if limpiar_texto(pais) == limpiar_texto("MÉXICO"):
-        df_mun, geo_mun, featureidkey = preparar_geojson_municipios_neutro_por_estado(estado)
+    corte_actual = next((c for c in df_suc.get("Corte", pd.Series(dtype=str)).dropna().astype(str).unique().tolist() if c), "")
+    titulo_corte = corte_actual if corte_actual else fecha_texto
 
-        if geo_mun and not df_mun.empty:
-            fig.add_trace(
-                go.Choropleth(
-                    geojson=geo_mun,
-                    locations=df_mun["__feature_id"],
-                    z=[1] * len(df_mun),
-                    featureidkey=featureidkey,
-                    colorscale=[[0, "rgba(235,241,252,0.88)"], [1, "rgba(235,241,252,0.88)"]],
-                    showscale=False,
-                    marker_line_color=COLOR_LINEA_MAPA_48,
-                    marker_line_width=0.45,
-                    name="División municipal",
-                    text=df_mun["Municipio"],
-                    hovertemplate="<b>%{text}</b><br>Municipio<extra></extra>",
-                )
-            )
-            titulo_division = "División municipal"
-        else:
-            try:
-                geojson = cargar_geojson_mexico()
-                geojson, prop_estado, mapa_geo = preparar_geojson_y_mapeo(geojson)
-                estado_norm = normalizar_estado_datos(estado)
-                estado_geo = mapa_geo.get(estado_norm)
-                if estado_geo:
-                    geo_estado = filtrar_geojson_estado(geojson, prop_estado, estado_geo)
-                    fig.add_trace(
-                        go.Choropleth(
-                            geojson=geo_estado,
-                            locations=[estado_geo],
-                            z=[1],
-                            featureidkey=f"properties.{prop_estado}",
-                            colorscale=[[0, "rgba(235,241,252,0.92)"], [1, "rgba(235,241,252,0.92)"]],
-                            showscale=False,
-                            marker_line_color=COLOR_LINEA_MAPA_65,
-                            marker_line_width=1,
-                            hoverinfo="skip",
-                            name=estado,
-                        )
-                    )
-                titulo_division = "Contorno estatal"
-            except Exception:
-                pass
-    else:
-        try:
-            geojson = cargar_geojson_por_pais(pais)
-            geojson, prop_estado, mapa_geo = preparar_geojson_region_norm(geojson, "PERÚ")
-            estado_norm = normalizar_estado_datos(estado)
-            estado_geo = mapa_geo.get(estado_norm)
-            if estado_geo:
-                geo_estado = filtrar_geojson_estado(geojson, prop_estado, estado_geo)
-                fig.add_trace(
-                    go.Choropleth(
-                        geojson=geo_estado,
-                        locations=[estado_geo],
-                        z=[1],
-                        featureidkey=f"properties.{prop_estado}",
-                        colorscale=[[0, "rgba(235,241,252,0.92)"], [1, "rgba(235,241,252,0.92)"]],
-                        showscale=False,
-                        marker_line_color=COLOR_LINEA_MAPA_65,
-                        marker_line_width=1,
-                        hoverinfo="skip",
-                        name=estado,
-                    )
-                )
-            titulo_division = "Departamento"
-        except Exception as e:
-            st.error(str(e))
-            return
-
-    agregar_burbujas_financieras_sucursales(fig, df_suc)
-    aplicar_estilo_geografico(fig, altura=720)
     fig.update_layout(
-        title=f"{estado} - {titulo_division} con plazo y composición de dispersión - {nombre_valera} - {fecha_texto}",
-        legend_title_text="Plazo y composición",
+        title=f"{estado} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}",
+        height=720,
+        margin=dict(l=10, r=10, t=70, b=10),
+        paper_bgcolor="rgba(255,255,255,0)",
+        plot_bgcolor="rgba(255,255,255,0)",
+        font=dict(color=COLOR_TEXTO),
     )
+
     renderizar_guia_interaccion_mapa_financiero()
     st.plotly_chart(fig, use_container_width=True)
 
