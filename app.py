@@ -5082,13 +5082,87 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
 
 def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_key: str) -> str | None:
     """
-    Renderiza el treemap y, si está disponible streamlit-plotly-events,
-    captura el clic sobre los bloques para recalcular las tarjetas.
+    Renderiza el treemap y captura clics en cualquier nivel:
+    Estado, Subdirección, Zona o Sucursal.
 
-    El hover queda desactivado para que no aparezca el cuadro emergente:
-    el comportamiento esperado es dar clic en el bloque y mover las tarjetas.
+    El popup de hover se mantiene desactivado. Las tarjetas se actualizan con el
+    bloque clicado, incluyendo bloques internos como Cd. Juárez.
     """
     chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
+
+    def resolver_node_id_desde_evento(punto: dict) -> str | None:
+        if not isinstance(punto, dict):
+            return None
+
+        ids_fig = list(fig.data[0].ids) if len(fig.data) and hasattr(fig.data[0], "ids") else []
+        labels_fig = list(fig.data[0].labels) if len(fig.data) and hasattr(fig.data[0], "labels") else []
+        parents_fig = list(fig.data[0].parents) if len(fig.data) and hasattr(fig.data[0], "parents") else []
+
+        # 1) Id directo, si el evento lo entrega.
+        for llave in ["id", "point_id", "pointId"]:
+            valor = punto.get(llave)
+            if valor:
+                return str(valor)
+
+        # 2) Customdata con node_id.
+        customdata = punto.get("customdata")
+        if isinstance(customdata, (list, tuple)) and len(customdata) >= 9 and customdata[8]:
+            return str(customdata[8])
+
+        # 3) Índice del punto contra fig.data[0].ids.
+        for llave in ["pointNumber", "pointIndex", "point_number", "pointIndex"]:
+            if llave in punto:
+                try:
+                    idx_punto = int(punto.get(llave))
+                    if 0 <= idx_punto < len(ids_fig):
+                        return str(ids_fig[idx_punto])
+                except Exception:
+                    pass
+
+        # 4) Fallback por etiqueta. Esto permite capturar hojas internas cuando
+        # streamlit-plotly-events no devuelve customdata ni pointNumber.
+        label_evento = punto.get("label") or punto.get("entry") or punto.get("text")
+        parent_evento = punto.get("parent")
+
+        if label_evento:
+            label_evento = str(label_evento)
+
+            candidatos = [
+                i for i, label in enumerate(labels_fig)
+                if str(label) == label_evento
+            ]
+
+            if parent_evento:
+                parent_evento = str(parent_evento)
+                candidatos_parent = []
+                for i in candidatos:
+                    parent_id = str(parents_fig[i]) if i < len(parents_fig) else ""
+                    parent_label = ""
+                    if parent_id in ids_fig:
+                        try:
+                            parent_label = str(labels_fig[ids_fig.index(parent_id)])
+                        except Exception:
+                            parent_label = ""
+
+                    if parent_evento in [parent_id, parent_label]:
+                        candidatos_parent.append(i)
+
+                if candidatos_parent:
+                    candidatos = candidatos_parent
+
+            if len(candidatos) == 1:
+                return str(ids_fig[candidatos[0]])
+
+            # Si hay duplicados, prioriza el nodo más profundo, normalmente la sucursal.
+            if len(candidatos) > 1:
+                candidatos = sorted(
+                    candidatos,
+                    key=lambda i: str(ids_fig[i]).count("::") if i < len(ids_fig) else 0,
+                    reverse=True,
+                )
+                return str(ids_fig[candidatos[0]])
+
+        return None
 
     if plotly_events is not None:
         try:
@@ -5102,35 +5176,9 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
                 key=chart_key,
             )
 
-            nuevo_node_id = None
-
             if eventos:
                 punto = eventos[0] if isinstance(eventos, list) else eventos
-
-                if isinstance(punto, dict):
-                    # Algunos eventos de treemap sí entregan el id directo.
-                    for llave in ["id", "point_id", "pointId"]:
-                        valor = punto.get(llave)
-                        if valor:
-                            nuevo_node_id = str(valor)
-                            break
-
-                    # Otros eventos entregan customdata.
-                    if not nuevo_node_id:
-                        customdata = punto.get("customdata")
-                        if isinstance(customdata, (list, tuple)) and len(customdata) >= 9:
-                            nuevo_node_id = str(customdata[8])
-
-                    # Fallback más estable: usar pointNumber/pointIndex contra fig.data[0].ids.
-                    if not nuevo_node_id:
-                        idx_punto = punto.get("pointNumber", punto.get("pointIndex", punto.get("point_number")))
-                        try:
-                            idx_punto = int(idx_punto)
-                            ids_fig = list(fig.data[0].ids) if len(fig.data) else []
-                            if 0 <= idx_punto < len(ids_fig):
-                                nuevo_node_id = str(ids_fig[idx_punto])
-                        except Exception:
-                            pass
+                nuevo_node_id = resolver_node_id_desde_evento(punto)
 
                 if nuevo_node_id:
                     st.session_state[selection_key] = nuevo_node_id
@@ -5208,6 +5256,8 @@ def construir_mapa_estado_plazo_composicion(
         paper_bgcolor="rgba(255,255,255,0)",
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
+        clickmode="event+select",
+        uirevision=f"{estado}-{plazo_texto}",
     )
 
     renderizar_guia_interaccion_mapa_financiero()
