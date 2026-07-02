@@ -5085,48 +5085,74 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
     Renderiza el treemap y captura clics en cualquier nivel:
     Estado, Subdirección, Zona o Sucursal.
 
-    El popup de hover se mantiene desactivado. Las tarjetas se actualizan con el
-    bloque clicado, incluyendo bloques internos como Cd. Juárez.
+    Primero usa la selección nativa de Streamlit. Si esa versión de Streamlit
+    no la soporta, usa streamlit-plotly-events como respaldo. El popup de hover
+    se mantiene desactivado.
     """
     chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
 
-    def resolver_node_id_desde_evento(punto: dict) -> str | None:
-        if not isinstance(punto, dict):
+    def resolver_node_id_desde_punto(punto) -> str | None:
+        if punto is None:
             return None
 
         ids_fig = list(fig.data[0].ids) if len(fig.data) and hasattr(fig.data[0], "ids") else []
         labels_fig = list(fig.data[0].labels) if len(fig.data) and hasattr(fig.data[0], "labels") else []
         parents_fig = list(fig.data[0].parents) if len(fig.data) and hasattr(fig.data[0], "parents") else []
 
-        # 1) Id directo, si el evento lo entrega.
+        def get_val(obj, key, default=None):
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        # 1) Id directo.
         for llave in ["id", "point_id", "pointId"]:
-            valor = punto.get(llave)
+            valor = get_val(punto, llave)
             if valor:
                 return str(valor)
 
         # 2) Customdata con node_id.
-        customdata = punto.get("customdata")
+        customdata = get_val(punto, "customdata")
         if isinstance(customdata, (list, tuple)) and len(customdata) >= 9 and customdata[8]:
             return str(customdata[8])
 
         # 3) Índice del punto contra fig.data[0].ids.
-        for llave in ["pointNumber", "pointIndex", "point_number", "pointIndex"]:
-            if llave in punto:
+        for llave in ["point_number", "pointNumber", "point_index", "pointIndex", "pointNumber"]:
+            valor = get_val(punto, llave)
+            if valor is not None:
                 try:
-                    idx_punto = int(punto.get(llave))
+                    idx_punto = int(valor)
                     if 0 <= idx_punto < len(ids_fig):
                         return str(ids_fig[idx_punto])
                 except Exception:
                     pass
 
-        # 4) Fallback por etiqueta. Esto permite capturar hojas internas cuando
-        # streamlit-plotly-events no devuelve customdata ni pointNumber.
-        label_evento = punto.get("label") or punto.get("entry") or punto.get("text")
-        parent_evento = punto.get("parent")
+        # 4) currentPath / path de treemap. Ejemplo:
+        # /Chihuahua/Chihuahua/Chihuahua Norte/Cd. Juárez
+        for llave in ["currentPath", "current_path", "path"]:
+            ruta = get_val(punto, llave)
+            if ruta:
+                partes_ruta = [p for p in str(ruta).split("/") if p]
+                if partes_ruta:
+                    ultimo = partes_ruta[-1]
+                    candidatos = [
+                        i for i, label in enumerate(labels_fig)
+                        if str(label) == str(ultimo)
+                    ]
+                    if candidatos:
+                        candidatos = sorted(
+                            candidatos,
+                            key=lambda i: str(ids_fig[i]).count("::") if i < len(ids_fig) else 0,
+                            reverse=True,
+                        )
+                        return str(ids_fig[candidatos[0]])
+
+        # 5) Fallback por label/entry/text. Esto captura hojas internas
+        # como Cd. Juárez cuando el evento no trae customdata.
+        label_evento = get_val(punto, "label") or get_val(punto, "entry") or get_val(punto, "text")
+        parent_evento = get_val(punto, "parent")
 
         if label_evento:
             label_evento = str(label_evento)
-
             candidatos = [
                 i for i, label in enumerate(labels_fig)
                 if str(label) == label_evento
@@ -5153,7 +5179,6 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
             if len(candidatos) == 1:
                 return str(ids_fig[candidatos[0]])
 
-            # Si hay duplicados, prioriza el nodo más profundo, normalmente la sucursal.
             if len(candidatos) > 1:
                 candidatos = sorted(
                     candidatos,
@@ -5164,6 +5189,57 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
 
         return None
 
+    def resolver_node_id_desde_evento(evento) -> str | None:
+        if not evento:
+            return None
+
+        # Streamlit nativo: evento["selection"]["points"]
+        try:
+            if isinstance(evento, dict):
+                selection = evento.get("selection", {})
+                puntos = selection.get("points", []) if isinstance(selection, dict) else []
+            else:
+                selection = getattr(evento, "selection", None)
+                puntos = getattr(selection, "points", []) if selection is not None else []
+        except Exception:
+            puntos = []
+
+        if puntos:
+            return resolver_node_id_desde_punto(puntos[0])
+
+        # streamlit-plotly-events: lista directa de puntos.
+        if isinstance(evento, list) and evento:
+            return resolver_node_id_desde_punto(evento[0])
+
+        if isinstance(evento, dict):
+            return resolver_node_id_desde_punto(evento)
+
+        return None
+
+    # 1) Intento principal: selección nativa de Streamlit.
+    try:
+        evento = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=chart_key,
+            on_select="rerun",
+            selection_mode="points",
+        )
+        nuevo_node_id = resolver_node_id_desde_evento(evento)
+        if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
+            st.session_state[selection_key] = nuevo_node_id
+            st.rerun()
+
+        return st.session_state.get(selection_key)
+
+    except TypeError:
+        # Versiones anteriores de Streamlit no aceptan on_select/selection_mode.
+        pass
+    except Exception:
+        # Si la selección nativa falla, intenta con el componente externo.
+        pass
+
+    # 2) Respaldo: streamlit-plotly-events.
     if plotly_events is not None:
         try:
             eventos = plotly_events(
@@ -5176,13 +5252,10 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
                 key=chart_key,
             )
 
-            if eventos:
-                punto = eventos[0] if isinstance(eventos, list) else eventos
-                nuevo_node_id = resolver_node_id_desde_evento(punto)
-
-                if nuevo_node_id:
-                    st.session_state[selection_key] = nuevo_node_id
-                    st.rerun()
+            nuevo_node_id = resolver_node_id_desde_evento(eventos)
+            if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
+                st.session_state[selection_key] = nuevo_node_id
+                st.rerun()
 
             return st.session_state.get(selection_key)
 
