@@ -12,6 +12,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from streamlit_plotly_events import plotly_events
+except Exception:
+    plotly_events = None
+
 
 # ======================================================
 # CONFIGURACIÓN GENERAL
@@ -5041,10 +5046,6 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
         suc_id = f"suc::{r['Subdirección']}::{r['Zona']}::{r['Sucursal']}"
         add_node(suc_id, r["Sucursal"], zona_id, r)
 
-    selectedpoints = []
-    if selected_node_id:
-        selectedpoints = [i for i, node_id in enumerate(ids) if str(node_id) == str(selected_node_id)]
-
     fig = go.Figure(
         go.Treemap(
             ids=ids,
@@ -5070,9 +5071,6 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
             ),
             textfont=dict(size=16),
             customdata=custom,
-            selectedpoints=selectedpoints if selectedpoints else None,
-            selected=dict(marker=dict(line=dict(width=4, color=COLOR_OSCURO))),
-            unselected=dict(marker=dict(opacity=0.82)),
             hovertemplate=(
                 "<b>%{label}</b><br><br>"
                 "Capital: $%{customdata[0]:,.0f}<br>"
@@ -5091,6 +5089,52 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
     )
 
     return fig
+
+
+def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_key: str) -> str | None:
+    """
+    Renderiza el treemap y, si está disponible streamlit-plotly-events,
+    captura el clic sobre los bloques para recalcular las tarjetas.
+
+    Nota técnica:
+    go.Treemap no acepta propiedades selectedpoints/selected/unselected.
+    Por eso el clic se captura con streamlit_plotly_events cuando está instalado.
+    """
+    chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
+
+    if plotly_events is not None:
+        try:
+            eventos = plotly_events(
+                fig,
+                click_event=True,
+                hover_event=False,
+                select_event=False,
+                override_height=720,
+                override_width="100%",
+                key=chart_key,
+            )
+
+            if eventos:
+                punto = eventos[0]
+                customdata = punto.get("customdata") if isinstance(punto, dict) else None
+                if isinstance(customdata, (list, tuple)) and len(customdata) >= 9:
+                    nuevo_node_id = str(customdata[8])
+                    if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
+                        st.session_state[selection_key] = nuevo_node_id
+                        st.rerun()
+
+            return st.session_state.get(selection_key)
+
+        except Exception as e:
+            st.warning(
+                "No pude activar el clic dinámico del treemap. "
+                "La gráfica se mostrará normal. Para activar clics, agrega streamlit-plotly-events a requirements.txt. "
+                f"Detalle: {e}"
+            )
+
+    st.plotly_chart(fig, use_container_width=True)
+    return st.session_state.get(selection_key)
+
 
 def construir_mapa_estado_plazo_composicion(
     df: pd.DataFrame,
@@ -5153,23 +5197,7 @@ def construir_mapa_estado_plazo_composicion(
     )
 
     renderizar_guia_interaccion_mapa_financiero()
-    chart_key = f"treemap_plazo_chart_{limpiar_texto(estado)}"
-    try:
-        evento = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key=chart_key,
-            on_select="rerun",
-            selection_mode="points",
-        )
-    except TypeError:
-        evento = None
-        st.plotly_chart(fig, use_container_width=True)
-
-    nuevo_node_id = extraer_node_id_evento_plotly(evento)
-    if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
-        st.session_state[selection_key] = nuevo_node_id
-        st.rerun()
+    renderizar_treemap_plazo_con_click(fig, estado, selection_key)
 
 # ======================================================
 # PÁGINA DE MAPA
