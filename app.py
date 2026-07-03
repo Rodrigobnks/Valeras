@@ -5055,7 +5055,7 @@ def renderizar_selector_plazo_y_kpis(
         )
 
         if hasattr(st, "popover"):
-            with st.popover(" ", use_container_width=True, help=help_text):
+            with st.popover("", use_container_width=True, help=help_text):
                 st.markdown("<div class='selector-tarjeta-opciones-popover'>", unsafe_allow_html=True)
                 for i, opcion in enumerate(opciones_disponibles):
                     etiqueta = format_func(opcion)
@@ -5266,41 +5266,61 @@ div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:active {
     opacity: 1 !important;
 }}
 
-/* Capa invisible para abrir el popover desde la tarjeta KPI */
-div[data-testid="stPopover"] > button {{
+/* Capa invisible para abrir el popover desde la tarjeta KPI.
+   El botón real de Streamlit queda encima de la tarjeta, pero totalmente invisible:
+   no se ve texto, borde ni flechita. */
+div[data-testid="stPopover"] {{
     margin-top: -82px !important;
+    height: 82px !important;
+    min-height: 82px !important;
+    position: relative !important;
+    z-index: 30 !important;
+}}
+
+div[data-testid="stPopover"] button,
+div[data-testid="stPopover"] button[kind],
+div[data-testid="stPopover"] button[data-testid*="baseButton"] {{
+    width: 100% !important;
     min-height: 82px !important;
     height: 82px !important;
-    width: 100% !important;
     padding: 0 !important;
+    margin: 0 !important;
     background: transparent !important;
     border: 0 !important;
+    outline: 0 !important;
     box-shadow: none !important;
     color: transparent !important;
-    opacity: 0.01 !important;
-    position: relative !important;
-    z-index: 10 !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
 }}
 
-div[data-testid="stPopover"] > button:hover,
-div[data-testid="stPopover"] > button:focus,
-div[data-testid="stPopover"] > button:active {{
+div[data-testid="stPopover"] button:hover,
+div[data-testid="stPopover"] button:focus,
+div[data-testid="stPopover"] button:active,
+div[data-testid="stPopover"] button[kind]:hover,
+div[data-testid="stPopover"] button[kind]:focus,
+div[data-testid="stPopover"] button[kind]:active {{
     background: transparent !important;
     border: 0 !important;
+    outline: 0 !important;
     box-shadow: none !important;
     color: transparent !important;
+    opacity: 0 !important;
 }}
 
-div[data-testid="stPopover"] > button svg,
-div[data-testid="stPopover"] > button p,
-div[data-testid="stPopover"] > button span {{
+div[data-testid="stPopover"] button *,
+div[data-testid="stPopover"] button svg,
+div[data-testid="stPopover"] button p,
+div[data-testid="stPopover"] button span {{
     display: none !important;
+    visibility: hidden !important;
     color: transparent !important;
     opacity: 0 !important;
 }}
 
 .selector-tarjeta-opciones-popover {{
     min-width: 220px;
+    max-width: 260px;
     padding: 2px 0 4px 0;
 }}
 
