@@ -3254,6 +3254,211 @@ def mostrar_comentarios_ia(
 
     st.markdown(resumen_html, unsafe_allow_html=True)
 
+
+
+def _sumar_columna(df: pd.DataFrame, columna: str) -> float:
+    if df is None or df.empty or columna not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[columna], errors="coerce").fillna(0).sum())
+
+
+def _promedio_ponderado_calidad(df: pd.DataFrame) -> float:
+    total = _sumar_columna(df, "Distribuidoras Totales")
+    corriente = _sumar_columna(df, "Distribuidoras al Corriente")
+    return (corriente / total * 100) if total else 0.0
+
+
+def _nombre_alcance_mapa(df_contexto: pd.DataFrame) -> str:
+    if df_contexto is None or df_contexto.empty:
+        return "la selección actual"
+
+    estados = sorted(df_contexto.get("Estado", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+    paises = sorted(df_contexto.get("País", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+
+    if len(estados) == 1:
+        return f"{estados[0]}"
+    if len(paises) == 1:
+        return f"{paises[0]}"
+    return "la selección actual"
+
+
+def _top_por_columna(df: pd.DataFrame, columna: str, nivel: str) -> tuple[str, float]:
+    if df is None or df.empty or columna not in df.columns or nivel not in df.columns:
+        return "Sin dato", 0.0
+
+    tmp = df.copy()
+    tmp[columna] = pd.to_numeric(tmp[columna], errors="coerce").fillna(0)
+    if tmp.empty:
+        return "Sin dato", 0.0
+
+    fila = tmp.sort_values(columna, ascending=False).iloc[0]
+    return str(fila[nivel]), float(fila[columna])
+
+
+def construir_comentario_ia_mapa(
+    df_contexto: pd.DataFrame,
+    df_mapa: pd.DataFrame,
+    nombre_valera: str,
+    fecha_sel: str,
+    nivel_vista: str,
+    variable_tamano: str,
+    tipo_mapa: str,
+    modo_tabla: str = "Todos",
+    texto_busqueda: str = "",
+    estado_sel: str = "",
+) -> str:
+    if df_contexto is None or df_contexto.empty:
+        return ""
+
+    alcance = _nombre_alcance_mapa(df_contexto)
+    total = _sumar_columna(df_contexto, "Distribuidoras Totales")
+    corriente = _sumar_columna(df_contexto, "Distribuidoras al Corriente")
+    mora = _sumar_columna(df_contexto, "Distribuidoras en Mora")
+    calidad = _promedio_ponderado_calidad(df_contexto)
+    var_corriente = _sumar_columna(df_contexto, "Var Dist Corriente")
+    var_mora = _sumar_columna(df_contexto, "Var Dist en Mora")
+    canjes_dia = _sumar_columna(df_contexto, "Canjes Fecha Corte")
+    dispersado_dia = _sumar_columna(df_contexto, "Total Dispersado Fecha Corte")
+
+    if tipo_mapa == "Calor Canjes":
+        top_nombre, top_valor = _top_por_columna(df_mapa, "Canjes Fecha Corte", nivel_vista)
+        lectura_color = (
+            f"El color está priorizando los <b>canjes del día de corte</b>. "
+            f"El mayor punto en la vista activa es <b>{top_nombre}</b>, con <b>{formato_numero(top_valor)}</b> canjes del corte."
+        )
+    elif tipo_mapa == "Calor Dispersado":
+        top_nombre, top_valor = _top_por_columna(df_mapa, "Total Dispersado Fecha Corte", nivel_vista)
+        lectura_color = (
+            f"El color está priorizando el <b>importe dispersado del día de corte</b>. "
+            f"El mayor punto en la vista activa es <b>{top_nombre}</b>, con <b>{formato_moneda(top_valor)}</b> dispersados en el corte."
+        )
+    else:
+        top_nombre, top_valor = _top_por_columna(df_mapa, variable_tamano, nivel_vista)
+        lectura_color = (
+            f"El color está mostrando la <b>estructura por Subdirección</b> y el tamaño de las bolitas responde a <b>{variable_tamano}</b>. "
+            f"El elemento con mayor peso en esa variable es <b>{top_nombre}</b>, con <b>{formato_numero(top_valor) if variable_tamano != 'Calidad de Cartera' else f'{top_valor:,.2f}%'}</b>."
+        )
+
+    if calidad >= 70:
+        semaforo = "La calidad general es favorable; la lectura del mapa debe enfocarse en sostener cobertura y replicar las zonas fuertes."
+    elif calidad >= 55:
+        semaforo = "La calidad está en rango medio; conviene usar el mapa para separar zonas con buen volumen de zonas con presión de mora."
+    else:
+        semaforo = "La calidad está en zona de atención; el mapa debe usarse para ubicar focos de recuperación y priorizar seguimiento operativo."
+
+    if var_corriente > var_mora:
+        lectura_var = "La variación favorece a distribuidoras al corriente frente a mora, señal positiva para el corte."
+    elif var_corriente < var_mora:
+        lectura_var = "La variación en mora pesa más que la mejora al corriente; la interacción debe concentrarse en los puntos rojos o de menor calidad."
+    else:
+        lectura_var = "La variación está equilibrada; el foco debe pasar a conversión comercial y calidad por zona."
+
+    filtro = ""
+    if modo_tabla in ["Top 10", "Bottom 10"]:
+        filtro += f" La vista está filtrada en <b>{modo_tabla}</b>, por lo que el mapa resalta sólo los extremos de la variable activa."
+    if str(texto_busqueda).strip():
+        filtro += f" La búsqueda activa es <b>{texto_busqueda}</b>, así que la lectura queda acotada al texto filtrado."
+
+    ultimo_click = st.session_state.get("ia_mapa_ultimo_click", "")
+    lectura_click = ""
+    if ultimo_click:
+        lectura_click = f" Última interacción detectada: <b>{ultimo_click}</b>; las métricas y la tabla ya se recalcularon con ese contexto."
+
+    return f"""
+<div class="ai-panel">
+    <h3>Comentario IA del mapa</h3>
+    <p>
+        Al corte <b>{fecha_sel}</b>, el mapa de <b>{nombre_valera}</b> está leyendo <b>{alcance}</b> a nivel <b>{nivel_vista}</b>.
+        La selección concentra <b>{formato_numero(total)}</b> distribuidoras, con <b>{formato_numero(corriente)}</b> al corriente,
+        <b>{formato_numero(mora)}</b> en mora y una calidad de cartera de <b>{calidad:,.2f}%</b>.
+    </p>
+    <p>{lectura_color} {semaforo}</p>
+    <p>
+        En el corte del día se observan <b>{formato_numero(canjes_dia)}</b> canjes por <b>{formato_moneda(dispersado_dia)}</b>.
+        {lectura_var}{filtro}{lectura_click}
+    </p>
+</div>
+"""
+
+
+def mostrar_comentario_ia_mapa(*args, **kwargs):
+    html = construir_comentario_ia_mapa(*args, **kwargs)
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
+
+
+def construir_comentario_ia_tabla_resumen(
+    resumen_tabla: pd.DataFrame,
+    nivel_vista: str,
+    variable_tamano: str,
+    modo_tabla: str,
+    texto_busqueda: str,
+    fecha_sel: str,
+) -> str:
+    if resumen_tabla is None or resumen_tabla.empty:
+        return f"""
+<div class="ai-panel">
+    <h3>Comentario IA de la tabla</h3>
+    <p>No hay registros visibles para la tabla con los filtros actuales. Revisa el buscador o cambia el nivel de resumen.</p>
+</div>
+"""
+
+    total = _sumar_columna(resumen_tabla, "Distribuidoras Totales")
+    corriente = _sumar_columna(resumen_tabla, "Distribuidoras al Corriente")
+    mora = _sumar_columna(resumen_tabla, "Distribuidoras en Mora")
+    calidad = (corriente / total * 100) if total else 0
+    var_corriente = _sumar_columna(resumen_tabla, "Var Dist Corriente")
+    var_mora = _sumar_columna(resumen_tabla, "Var Dist en Mora")
+    dispersado = _sumar_columna(resumen_tabla, "Total Dispersado")
+    canjes = _sumar_columna(resumen_tabla, "Canjes")
+    ticket = (dispersado / canjes) if canjes else 0
+
+    top_calidad, top_calidad_val = _top_por_columna(resumen_tabla, "Calidad de Cartera", nivel_vista)
+    top_mora, top_mora_val = _top_por_columna(resumen_tabla, "Distribuidoras en Mora", nivel_vista)
+    top_disp, top_disp_val = _top_por_columna(resumen_tabla, "Total Dispersado", nivel_vista)
+    top_variable, top_variable_val = _top_por_columna(resumen_tabla, variable_tamano, nivel_vista)
+
+    if var_corriente > 0 and var_corriente > var_mora:
+        lectura = "La tabla muestra una señal favorable: la mejora al corriente supera la presión de mora."
+    elif var_corriente < 0:
+        lectura = "La tabla muestra deterioro en distribuidoras al corriente; conviene revisar primero los registros con mayor mora y caída."
+    elif var_mora > var_corriente:
+        lectura = "La mora está creciendo más que la base al corriente; la prioridad es contener deterioro en los registros con mayor volumen."
+    else:
+        lectura = "La tabla muestra estabilidad relativa; el foco debe estar en elevar calidad sin sacrificar dispersión."
+
+    filtro = f"Vista <b>{modo_tabla}</b> ordenada por <b>{variable_tamano}</b>."
+    if str(texto_busqueda).strip():
+        filtro += f" Búsqueda aplicada: <b>{texto_busqueda}</b>."
+
+    valor_top_variable = f"{top_variable_val:,.2f}%" if variable_tamano == "Calidad de Cartera" else formato_numero(top_variable_val)
+
+    return f"""
+<div class="ai-panel">
+    <h3>Comentario IA de la tabla inferior</h3>
+    <p>
+        Al corte <b>{fecha_sel}</b>, la tabla visible por <b>{nivel_vista}</b> resume <b>{len(resumen_tabla):,}</b> registros. {filtro}
+        En conjunto concentra <b>{formato_numero(total)}</b> distribuidoras, con calidad de cartera de <b>{calidad:,.2f}%</b>
+        y ticket promedio acumulado de <b>{formato_moneda(ticket)}</b>.
+    </p>
+    <p>
+        {lectura} El registro líder en <b>{variable_tamano}</b> es <b>{top_variable}</b> con <b>{valor_top_variable}</b>.
+        La mayor calidad aparece en <b>{top_calidad}</b> (<b>{top_calidad_val:,.2f}%</b>), mientras que el mayor foco de mora está en
+        <b>{top_mora}</b> con <b>{formato_numero(top_mora_val)}</b> distribuidoras en mora.
+    </p>
+    <p>
+        En lectura comercial, <b>{top_disp}</b> concentra la mayor dispersión acumulada visible con <b>{formato_moneda(top_disp_val)}</b>.
+        Usa esta tabla para priorizar dónde hay más volumen, dónde se deteriora la cartera y dónde la dispersión requiere seguimiento.
+    </p>
+</div>
+"""
+
+
+def mostrar_comentario_ia_tabla_resumen(*args, **kwargs):
+    html = construir_comentario_ia_tabla_resumen(*args, **kwargs)
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
+
 # ======================================================
 # DIVISIÓN POLÍTICA EXACTA POR SUBDIRECCIÓN
 # ======================================================
@@ -4131,6 +4336,7 @@ def construir_mapa_estados_mexico(
                     estado_real = customdata[0]
 
             if estado_real:
+                st.session_state["ia_mapa_ultimo_click"] = estado_real
                 set_query_params(
                     valera=get_query_param("valera", ""),
                     estado=estado_real,
@@ -4230,6 +4436,7 @@ def construir_mapa_estados_peru(
                     estado_real = customdata[0]
 
             if estado_real:
+                st.session_state["ia_mapa_ultimo_click"] = estado_real
                 set_query_params(
                     valera=get_query_param("valera", ""),
                     estado=estado_real,
@@ -5619,6 +5826,19 @@ def mostrar_mapa(valera_param: str):
 
         st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
 
+    mostrar_comentario_ia_mapa(
+        df_contexto=df_resumen_base,
+        df_mapa=df_mapa_previo,
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+        nivel_vista=nivel_vista,
+        variable_tamano=variable_tamano,
+        tipo_mapa=tipo_mapa,
+        modo_tabla=modo_tabla_actual,
+        texto_busqueda=texto_busqueda_actual,
+        estado_sel=estado_sel,
+    )
+
     cols_tipo_mapa_bajo_leyenda = st.columns([2.2, 1])
     with cols_tipo_mapa_bajo_leyenda[1]:
         tipo_mapa = selector_botones(
@@ -5835,6 +6055,15 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         df=resumen_nivel,
         modo=modo_tabla,
         variable_tamano=variable_tamano,
+    )
+
+    mostrar_comentario_ia_tabla_resumen(
+        resumen_tabla=resumen_nivel,
+        nivel_vista=nivel_vista,
+        variable_tamano=variable_tamano,
+        modo_tabla=modo_tabla,
+        texto_busqueda=texto_busqueda,
+        fecha_sel=fecha_sel,
     )
 
     mostrar_tabla_variacion(
