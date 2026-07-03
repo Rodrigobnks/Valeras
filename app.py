@@ -5259,7 +5259,7 @@ div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:active {
 }}
 
 /* Tarjeta desplegable profesional para Plazo y Corte */
-div[data-testid="stPopover"] > button {
+div[data-testid="stPopover"] > button {{
     background: rgba(255,255,255,0.96) !important;
     border: 1px solid {COLOR_BORDE} !important;
     border-radius: 16px !important;
@@ -5274,30 +5274,30 @@ div[data-testid="stPopover"] > button {
     justify-content: center !important;
     text-align: left !important;
     gap: 6px !important;
-}
+}}
 
 div[data-testid="stPopover"] > button:hover,
-div[data-testid="stPopover"] > button:focus {
+div[data-testid="stPopover"] > button:focus {{
     border-color: {COLOR_PRIMARIO} !important;
     box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12) !important;
     background: rgba(255,255,255,0.98) !important;
-}
+}}
 
-div[data-testid="stPopover"] > button svg {
+div[data-testid="stPopover"] > button svg {{
     display: none !important;
-}
+}}
 
-div[data-testid="stPopover"] > button p {
+div[data-testid="stPopover"] > button p {{
     margin: 0 !important;
     color: {COLOR_TEXTO} !important;
     font-size: 13px !important;
     font-weight: 700 !important;
     opacity: 0.86 !important;
     line-height: 1.08 !important;
-}
+}}
 
 div[data-testid="stPopover"] > button p:last-child,
-div[data-testid="stPopover"] > button div:last-child p:last-child {
+div[data-testid="stPopover"] > button div:last-child p:last-child {{
     color: {COLOR_PRIMARIO} !important;
     font-size: clamp(18px, 1.45vw, 30px) !important;
     font-weight: 900 !important;
@@ -5305,18 +5305,18 @@ div[data-testid="stPopover"] > button div:last-child p:last-child {
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-}
+}}
 
-.selector-tarjeta-opciones-popover {
+.selector-tarjeta-opciones-popover {{
     min-width: 220px;
     padding: 2px 0 4px 0;
-}
+}}
 
-.selector-tarjeta-opciones-popover div[data-testid="stButton"] > button {
+.selector-tarjeta-opciones-popover div[data-testid="stButton"] > button {{
     margin-top: 6px !important;
     min-height: 38px !important;
     border-radius: 12px !important;
-}
+}}
 </style>
 """,
         unsafe_allow_html=True,
