@@ -5839,14 +5839,20 @@ def mostrar_mapa(valera_param: str):
         estado_sel=estado_sel,
     )
 
-    cols_tipo_mapa_bajo_leyenda = st.columns([2.2, 1])
-    with cols_tipo_mapa_bajo_leyenda[1]:
-        tipo_mapa = selector_botones(
-            "Tipo de mapa",
-            ["Subdirección", "Calor Canjes", "Calor Dispersado"],
-            "tipo_mapa_valeras",
-            "Subdirección",
-        )
+    mostrar_botones_tipo_mapa = True
+    if estado_sel and (es_mexico or es_peru):
+        vista_detalle_actual = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
+        mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
+
+    if mostrar_botones_tipo_mapa:
+        cols_tipo_mapa_bajo_leyenda = st.columns([2.2, 1])
+        with cols_tipo_mapa_bajo_leyenda[1]:
+            tipo_mapa = selector_botones(
+                "Tipo de mapa",
+                ["Subdirección", "Calor Canjes", "Calor Dispersado"],
+                "tipo_mapa_valeras",
+                "Subdirección",
+            )
 
     df_mapa = preparar_mapa_por_nivel(
         df=df_resumen_base,
