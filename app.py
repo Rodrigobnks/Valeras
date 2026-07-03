@@ -3416,6 +3416,95 @@ def mostrar_comentario_ia_mapa(*args, **kwargs):
         st.markdown(html, unsafe_allow_html=True)
 
 
+def construir_comentario_ia_mapa_plazo_composicion(
+    df_plazo: pd.DataFrame,
+    nombre_valera: str,
+    estado: str,
+    plazo_texto: str,
+    metricas: dict,
+    selected_node_id: str | None = None,
+) -> str:
+    if df_plazo is None or df_plazo.empty:
+        return ""
+
+    corte = metricas.get("Corte", "") or obtener_corte_desde_base(df_plazo, "")
+    alcance = etiqueta_nodo_treemap(selected_node_id)
+    capital = float(metricas.get("Capital", 0) or 0)
+    interes = float(metricas.get("Interes", 0) or 0)
+    total = float(metricas.get("Total", 0) or 0)
+    tasa = float(metricas.get("Tasa de Ganancia", 0) or 0)
+    vales = float(metricas.get("Vales", 0) or 0)
+    monto_vale = float(metricas.get("Monto Vale", 0) or 0)
+
+    df_tmp = df_plazo.copy()
+    for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Vales"]:
+        if col not in df_tmp.columns:
+            df_tmp[col] = 0
+        df_tmp[col] = pd.to_numeric(df_tmp[col], errors="coerce").fillna(0)
+
+    nivel_top = "Sucursal" if "Sucursal" in df_tmp.columns else None
+    top_nombre = "Sin dato"
+    top_capital = 0.0
+    top_tasa = 0.0
+
+    if nivel_top:
+        top_df = (
+            df_tmp.groupby(nivel_top, as_index=False)
+            .agg(
+                Capital=("Capital", "sum"),
+                Interes=("Interes", "sum"),
+                Total=("Total", "sum"),
+                Vales=("Vales", "sum"),
+            )
+        )
+        if not top_df.empty:
+            top_df["Tasa de Ganancia"] = top_df.apply(
+                lambda r: (r["Interes"] / r["Capital"] * 100) if r["Capital"] else 0,
+                axis=1,
+            )
+            fila_top = top_df.sort_values("Capital", ascending=False).iloc[0]
+            top_nombre = str(fila_top[nivel_top])
+            top_capital = float(fila_top["Capital"])
+            top_tasa = float(fila_top["Tasa de Ganancia"])
+
+    if tasa >= 58:
+        lectura_tasa = "La tasa se mantiene en una zona sólida frente al capital colocado."
+    elif tasa >= 55:
+        lectura_tasa = "La tasa se ubica en un rango medio; conviene revisar dónde el volumen crece sin deteriorar rentabilidad."
+    else:
+        lectura_tasa = "La tasa queda en zona de atención relativa; el foco debe ir a las sucursales con menor rendimiento sobre capital."
+
+    if plazo_texto == "Todos":
+        lectura_plazo = "La lectura consolida todos los plazos disponibles para el corte seleccionado."
+    else:
+        lectura_plazo = f"La lectura está concentrada en <b>{plazo_texto}</b>, por lo que el comparativo se limita a ese vencimiento."
+
+    return f"""
+<div class="ai-panel">
+    <p>
+        Al corte <b>{corte}</b>, <b>{nombre_valera}</b> en <b>{estado}</b> muestra una lectura financiera de <b>Plazo y composición</b>.
+        {lectura_plazo} El alcance activo es <b>{alcance}</b>.
+    </p>
+    <p>
+        La base visible suma <b>{formato_moneda(capital)}</b> de capital, <b>{formato_moneda(interes)}</b> de interés,
+        <b>{formato_numero(vales)}</b> vales y un monto promedio por vale de <b>{formato_moneda(monto_vale)}</b>.
+        La tasa de ganancia es <b>{tasa:,.1f}%</b>. {lectura_tasa}
+    </p>
+    <p>
+        El mayor peso por capital está en <b>{top_nombre}</b>, con <b>{formato_moneda(top_capital)}</b>
+        y una tasa aproximada de <b>{top_tasa:,.1f}%</b>. Esta lectura corresponde al treemap financiero seleccionado,
+        no al mapa de estructura operativa.
+    </p>
+</div>
+"""
+
+
+def mostrar_comentario_ia_mapa_plazo_composicion(*args, **kwargs):
+    html = construir_comentario_ia_mapa_plazo_composicion(*args, **kwargs)
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
+
+
 def construir_comentario_ia_tabla_resumen(
     resumen_tabla: pd.DataFrame,
     nivel_vista: str,
@@ -5807,7 +5896,16 @@ def construir_mapa_estado_plazo_composicion(
     )
 
     renderizar_guia_interaccion_mapa_financiero()
-    renderizar_treemap_plazo_con_click(fig, estado, selection_key)
+    selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, estado, selection_key)
+
+    mostrar_comentario_ia_mapa_plazo_composicion(
+        df_plazo=df_suc_filtrado,
+        nombre_valera=nombre_valera,
+        estado=estado,
+        plazo_texto=plazo_texto,
+        metricas=metricas_plazo,
+        selected_node_id=selected_node_id_actual or selected_node_id,
+    )
 
 # ======================================================
 # PÁGINA DE MAPA
@@ -6092,22 +6190,26 @@ def mostrar_mapa(valera_param: str):
 
         st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
 
-    fecha_mapa_ia = fecha_sel
-    if estado_sel and (es_mexico or es_peru) and st.session_state.get("vista_detalle_estado_valeras", "Estructura") == "Plazo y composición":
-        fecha_mapa_ia = st.session_state.get("corte_plazo_composicion_actual", fecha_sel) or fecha_sel
-
-    mostrar_comentario_ia_mapa(
-        df_contexto=df_resumen_base,
-        df_mapa=df_mapa_previo,
-        nombre_valera=nombre_valera,
-        fecha_sel=fecha_mapa_ia,
-        nivel_vista=nivel_vista,
-        variable_tamano=variable_tamano,
-        tipo_mapa=tipo_mapa,
-        modo_tabla=modo_tabla_actual,
-        texto_busqueda=texto_busqueda_actual,
-        estado_sel=estado_sel,
+    vista_detalle_actual_para_comentario = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
+    mostrar_comentario_mapa_estructura = not (
+        estado_sel
+        and (es_mexico or es_peru)
+        and vista_detalle_actual_para_comentario == "Plazo y composición"
     )
+
+    if mostrar_comentario_mapa_estructura:
+        mostrar_comentario_ia_mapa(
+            df_contexto=df_resumen_base,
+            df_mapa=df_mapa_previo,
+            nombre_valera=nombre_valera,
+            fecha_sel=fecha_sel,
+            nivel_vista=nivel_vista,
+            variable_tamano=variable_tamano,
+            tipo_mapa=tipo_mapa,
+            modo_tabla=modo_tabla_actual,
+            texto_busqueda=texto_busqueda_actual,
+            estado_sel=estado_sel,
+        )
 
     mostrar_botones_tipo_mapa = True
     if estado_sel and (es_mexico or es_peru):
