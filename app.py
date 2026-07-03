@@ -4436,29 +4436,24 @@ def construir_mapa_estados_mexico(
 
         if puntos:
             punto = puntos[0]
-            estado_real = None
 
-            # Si el clic fue en un polígono de estado.
+            # El mapa nacional ya NO entra al detalle por estado/departamento.
+            # Sólo abre detalle al dar clic en una bolita de sucursal, tomando su Subdirección.
+            # Los polígonos políticos se conservan como contexto visual, pero no navegan.
             estado_geo = punto.get("location")
             if estado_geo:
-                serie_estado = resumen_estado.loc[
-                    resumen_estado["Estado Geo"] == estado_geo,
-                    "Estado",
-                ]
-                if not serie_estado.empty:
-                    estado_real = serie_estado.iloc[0]
+                return
 
-            # Si el clic fue en una bolita de sucursal.
-            if estado_real is None:
-                customdata = punto.get("customdata")
-                if customdata and len(customdata) > 0:
-                    estado_real = customdata[0]
+            subdireccion_real = None
+            customdata = punto.get("customdata")
+            if customdata and len(customdata) > 1:
+                subdireccion_real = customdata[1]
 
-            if estado_real:
-                st.session_state["ia_mapa_ultimo_click"] = estado_real
+            if subdireccion_real:
+                st.session_state["ia_mapa_ultimo_click"] = subdireccion_real
                 set_query_params(
                     valera=get_query_param("valera", ""),
-                    estado=estado_real,
+                    subdireccion=subdireccion_real,
                 )
                 st.rerun()
 
@@ -4538,27 +4533,24 @@ def construir_mapa_estados_peru(
 
         if puntos:
             punto = puntos[0]
-            estado_real = None
 
+            # El mapa nacional ya NO entra al detalle por estado/departamento.
+            # Sólo abre detalle al dar clic en una bolita de sucursal, tomando su Subdirección.
+            # Los polígonos políticos se conservan como contexto visual, pero no navegan.
             estado_geo = punto.get("location")
             if estado_geo:
-                serie_estado = resumen_estado.loc[
-                    resumen_estado["Estado Geo"] == estado_geo,
-                    "Estado",
-                ]
-                if not serie_estado.empty:
-                    estado_real = serie_estado.iloc[0]
+                return
 
-            if estado_real is None:
-                customdata = punto.get("customdata")
-                if customdata and len(customdata) > 0:
-                    estado_real = customdata[0]
+            subdireccion_real = None
+            customdata = punto.get("customdata")
+            if customdata and len(customdata) > 1:
+                subdireccion_real = customdata[1]
 
-            if estado_real:
-                st.session_state["ia_mapa_ultimo_click"] = estado_real
+            if subdireccion_real:
+                st.session_state["ia_mapa_ultimo_click"] = subdireccion_real
                 set_query_params(
                     valera=get_query_param("valera", ""),
-                    estado=estado_real,
+                    subdireccion=subdireccion_real,
                 )
                 st.rerun()
 
@@ -5907,6 +5899,85 @@ def construir_mapa_estado_plazo_composicion(
         selected_node_id=selected_node_id_actual or selected_node_id,
     )
 
+
+def construir_mapa_subdireccion_plazo_composicion(
+    df: pd.DataFrame,
+    nombre_valera: str,
+    subdireccion: str,
+    fecha_texto: str,
+    pais: str = "MÉXICO",
+):
+    df_sub = df[df["Subdirección"].apply(limpiar_texto) == limpiar_texto(subdireccion)].copy()
+
+    if df_sub.empty:
+        st.warning(f"No hay datos para la Subdirección {subdireccion}.")
+        return
+
+    df_suc = preparar_sucursales_financieras_para_mapa(df_sub)
+
+    if df_suc.empty:
+        st.warning("No hay sucursales para esta subdirección.")
+        return
+
+    selection_key = f"treemap_plazo_selected_subdireccion_{limpiar_texto(subdireccion)}"
+    selected_node_id = st.session_state.get(selection_key)
+
+    df_suc_filtrado, plazo_texto, metricas_plazo = renderizar_selector_plazo_y_kpis(
+        df_suc,
+        subdireccion,
+        selected_node_id=selected_node_id,
+    )
+
+    if df_suc_filtrado.empty:
+        st.warning("No hay datos para el plazo seleccionado.")
+        return
+
+    try:
+        fig = construir_treemap_plazo_composicion(
+            df_suc_filtrado,
+            subdireccion,
+            selected_node_id=selected_node_id,
+        )
+    except Exception as e:
+        st.warning(str(e))
+        return
+
+    corte_actual = metricas_plazo.get("Corte", "")
+    if not corte_actual and "Corte Texto" in df_suc_filtrado.columns:
+        corte_actual = next((c for c in df_suc_filtrado["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
+    if not corte_actual and "Corte" in df_suc_filtrado.columns:
+        corte_actual = next((formatear_corte_plazo(c) for c in df_suc_filtrado["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
+    if not corte_actual:
+        corte_actual = obtener_corte_visible_plazo()
+
+    st.session_state["corte_plazo_composicion_actual"] = corte_actual
+
+    titulo_corte = f"Corte plazo {corte_actual}" if corte_actual else "Corte plazo no disponible"
+    titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
+
+    fig.update_layout(
+        title=f"{subdireccion} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}{titulo_plazo}",
+        height=720,
+        margin=dict(l=10, r=10, t=70, b=10),
+        paper_bgcolor="rgba(255,255,255,0)",
+        plot_bgcolor="rgba(255,255,255,0)",
+        font=dict(color=COLOR_TEXTO),
+        clickmode="event+select",
+        uirevision=f"{subdireccion}-{corte_actual}-{plazo_texto}",
+    )
+
+    renderizar_guia_interaccion_mapa_financiero()
+    selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, subdireccion, selection_key)
+
+    mostrar_comentario_ia_mapa_plazo_composicion(
+        df_plazo=df_suc_filtrado,
+        nombre_valera=nombre_valera,
+        estado=f"Subdirección {subdireccion}",
+        plazo_texto=plazo_texto,
+        metricas=metricas_plazo,
+        selected_node_id=selected_node_id_actual or selected_node_id,
+    )
+
 # ======================================================
 # PÁGINA DE MAPA
 # ======================================================
@@ -5924,7 +5995,7 @@ def mostrar_mapa(valera_param: str):
     # Al entrar a una valera nueva, fuerza siempre el mapa completo.
     if st.session_state.get("__ultima_valera_abierta") != valera_param:
         st.session_state["__ultima_valera_abierta"] = valera_param
-        if get_query_param("estado", ""):
+        if get_query_param("estado", "") or get_query_param("subdireccion", ""):
             set_query_params(valera=valera_param)
             st.rerun()
 
@@ -6006,9 +6077,45 @@ def mostrar_mapa(valera_param: str):
     df_filtrado = agregar_columnas_variacion(df_filtrado)
     df_filtrado = recalcular_canje_promedio(df_filtrado)
 
+    # El detalle principal ahora se abre por Subdirección, no por estado.
+    # Dentro de esa subdirección se puede elegir un estado/departamento específico.
+    subdireccion_sel = get_query_param("subdireccion", "")
     estado_sel = get_query_param("estado", "")
+    estado_detalle_sel = "Todos"
+
     df_resumen_base = df_filtrado.copy()
-    if estado_sel:
+    if subdireccion_sel:
+        df_subdireccion = df_filtrado[
+            df_filtrado["Subdirección"].apply(limpiar_texto) == limpiar_texto(subdireccion_sel)
+        ].copy()
+        if df_subdireccion.empty:
+            df_subdireccion = df_filtrado.copy()
+
+        estados_disponibles = sorted(
+            [x for x in df_subdireccion["Estado"].dropna().astype(str).unique().tolist() if limpiar_texto(x) and limpiar_texto(x) != "SIN ESTADO"]
+        )
+        opciones_estado_detalle = ["Todos"] + estados_disponibles
+        index_estado_detalle = opciones_estado_detalle.index(estado_sel) if estado_sel in opciones_estado_detalle else 0
+
+        estado_detalle_sel = st.selectbox(
+            "Estado / departamento dentro de la subdirección",
+            opciones_estado_detalle,
+            index=index_estado_detalle,
+            key=f"estado_detalle_subdireccion_{limpiar_texto(subdireccion_sel)}",
+        )
+
+        if estado_detalle_sel == "Todos":
+            estado_sel = ""
+            df_resumen_base = df_subdireccion.copy()
+        else:
+            estado_sel = estado_detalle_sel
+            df_resumen_base = df_subdireccion[
+                df_subdireccion["Estado"].apply(limpiar_texto) == limpiar_texto(estado_detalle_sel)
+            ].copy()
+            if df_resumen_base.empty:
+                df_resumen_base = df_subdireccion.copy()
+    elif estado_sel:
+        # Compatibilidad con enlaces antiguos que todavía traigan ?estado=...
         df_resumen_base = df_filtrado[
             df_filtrado["Estado"].apply(limpiar_texto) == limpiar_texto(estado_sel)
         ].copy()
@@ -6099,7 +6206,7 @@ def mostrar_mapa(valera_param: str):
             variable_tamano=variable_tamano,
             tipo_mapa=tipo_mapa,
             solo_ejecutivo=True,
-            conservar_tarjetas=bool(estado_sel),
+            conservar_tarjetas=bool(subdireccion_sel or estado_sel),
         )
 
     # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
@@ -6108,7 +6215,7 @@ def mostrar_mapa(valera_param: str):
     es_mexico = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("MÉXICO")
     es_peru = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("PERÚ")
 
-    detalle_estado_activo = bool(estado_sel and (es_mexico or es_peru))
+    detalle_estado_activo = bool((subdireccion_sel or estado_sel) and (es_mexico or es_peru))
     elementos_estructura_actual = int(df_mapa_previo[nivel_vista].nunique()) if nivel_vista in df_mapa_previo.columns else 0
     mostrar_top_bottom_detalle = (not detalle_estado_activo) or elementos_estructura_actual >= 20
 
@@ -6125,7 +6232,82 @@ def mostrar_mapa(valera_param: str):
         texto_busqueda=texto_busqueda_actual,
     )
 
-    if estado_sel and (es_mexico or es_peru):
+    if subdireccion_sel and (es_mexico or es_peru):
+        nombre_pais_volver = "México" if es_mexico else "Perú"
+        st.markdown(
+            f"""
+<a class="back-link" href="?valera={valera_param}" target="_self">← Volver al mapa de {nombre_pais_volver}</a>
+""",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            f"""
+<div class="resumen-title-box" style="margin-bottom:12px;">
+    <div class="resumen-title-text">Detalle activo por Subdirección: <b>{subdireccion_sel}</b></div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+        vista_detalle_estado = selector_botones(
+            "Vista del detalle",
+            ["Estructura", "Plazo y composición"],
+            "vista_detalle_estado_valeras",
+            "Estructura",
+        )
+
+        if vista_detalle_estado == "Plazo y composición":
+            if estado_sel:
+                construir_mapa_estado_plazo_composicion(
+                    df=df_resumen_base,
+                    nombre_valera=nombre_valera,
+                    estado=estado_sel,
+                    fecha_texto=fecha_sel,
+                    pais=pais_actual,
+                )
+            else:
+                construir_mapa_subdireccion_plazo_composicion(
+                    df=df_resumen_base,
+                    nombre_valera=nombre_valera,
+                    subdireccion=subdireccion_sel,
+                    fecha_texto=fecha_sel,
+                    pais=pais_actual,
+                )
+        else:
+            if estado_sel:
+                construir_mapa_estado_burbujas(
+                    df=df_resumen_base,
+                    nombre_valera=nombre_valera,
+                    estado=estado_sel,
+                    variable_tamano=variable_tamano,
+                    fecha_texto=fecha_sel,
+                    pais=pais_actual,
+                    destacar_nivel=nivel_vista,
+                    destacar_valores=valores_destacados_mapa,
+                    tipo_mapa=tipo_mapa,
+                )
+            elif es_mexico:
+                construir_mapa_estados_mexico(
+                    df=df_resumen_base,
+                    nombre_valera=nombre_valera,
+                    variable_tamano=variable_tamano,
+                    fecha_texto=fecha_sel,
+                    destacar_nivel=nivel_vista,
+                    destacar_valores=valores_destacados_mapa,
+                    tipo_mapa=tipo_mapa,
+                )
+            else:
+                construir_mapa_estados_peru(
+                    df=df_resumen_base,
+                    nombre_valera=nombre_valera,
+                    variable_tamano=variable_tamano,
+                    fecha_texto=fecha_sel,
+                    destacar_nivel=nivel_vista,
+                    destacar_valores=valores_destacados_mapa,
+                    tipo_mapa=tipo_mapa,
+                )
+    elif estado_sel and (es_mexico or es_peru):
         nombre_pais_volver = "México" if es_mexico else "Perú"
         st.markdown(
             f"""
@@ -6192,7 +6374,7 @@ def mostrar_mapa(valera_param: str):
 
     vista_detalle_actual_para_comentario = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
     mostrar_comentario_mapa_estructura = not (
-        estado_sel
+        (subdireccion_sel or estado_sel)
         and (es_mexico or es_peru)
         and vista_detalle_actual_para_comentario == "Plazo y composición"
     )
@@ -6212,7 +6394,7 @@ def mostrar_mapa(valera_param: str):
         )
 
     mostrar_botones_tipo_mapa = True
-    if estado_sel and (es_mexico or es_peru):
+    if (subdireccion_sel or estado_sel) and (es_mexico or es_peru):
         vista_detalle_actual = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
         mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
 
@@ -6241,7 +6423,7 @@ def mostrar_mapa(valera_param: str):
         "Distribuidoras al Corriente",
     ]
 
-    mostrar_resumen_pais = not bool(estado_sel and (es_mexico or es_peru))
+    mostrar_resumen_pais = not bool((subdireccion_sel or estado_sel) and (es_mexico or es_peru))
 
     if mostrar_resumen_pais:
         st.subheader("Resumen por país")
@@ -6309,7 +6491,7 @@ def mostrar_mapa(valera_param: str):
 
 **Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
 
-Cuando estás dentro del detalle de un estado, los botones **Top 10** y **Bottom 10** sólo se muestran si el nivel seleccionado tiene **20 o más elementos**. En este momento hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**, por eso la vista permite comparar extremos sin perder contexto operativo.
+Cuando estás dentro del detalle de una subdirección o estado, los botones **Top 10** y **Bottom 10** sólo se muestran si el nivel seleccionado tiene **20 o más elementos**. En este momento hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**, por eso la vista permite comparar extremos sin perder contexto operativo.
 
 El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 """
@@ -6319,7 +6501,7 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
 **Subdirección, Zona y Sucursal** cambian el nivel de análisis del mapa y de la tabla inferior.
 
-En el detalle de este estado hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**. Como son menos de 20, no se muestran los botones **Top 10** y **Bottom 10**, porque segmentar una base tan pequeña puede quitar contexto en lugar de ayudar.
+En el detalle de esta selección hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**. Como son menos de 20, no se muestran los botones **Top 10** y **Bottom 10**, porque segmentar una base tan pequeña puede quitar contexto en lugar de ayudar.
 
 En este caso, la tabla se mantiene completa y se ordena automáticamente de **mayor a menor** según la variable seleccionada: **{variable_tamano}**. Así puedes ver primero las estructuras con mayor peso operativo sin ocultar ningún registro.
 
