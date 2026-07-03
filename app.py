@@ -3051,6 +3051,8 @@ def mostrar_comentarios_ia(
     if df_resumen_base.empty:
         return
 
+    fecha_sel = obtener_corte_desde_base(df_resumen_base, fecha_sel)
+
     total_distribuidoras = pd.to_numeric(df_resumen_base.get("Distribuidoras Totales", 0), errors="coerce").fillna(0).sum()
     total_corriente = pd.to_numeric(df_resumen_base.get("Distribuidoras al Corriente", 0), errors="coerce").fillna(0).sum()
     total_mora = pd.to_numeric(df_resumen_base.get("Distribuidoras en Mora", 0), errors="coerce").fillna(0).sum()
@@ -3183,7 +3185,6 @@ def mostrar_comentarios_ia(
 
     resumen_html = f"""
 <div class="ai-panel">
-    <h3>Comentario IA ejecutivo</h3>
     <p>
         Al corte <b>{fecha_sel}</b>.
     </p>
@@ -3256,6 +3257,28 @@ def mostrar_comentarios_ia(
 
 
 
+
+def obtener_corte_desde_base(df: pd.DataFrame | None, default: str = "") -> str:
+    """
+    Obtiene el corte desde la base que alimenta el objeto visual.
+    Prioriza Corte Texto/Corte para Plazo y composición, y después Fecha de Corte Texto
+    para estructura/distribuidoras. Sólo usa default si la base no trae corte.
+    """
+    if df is not None and not df.empty:
+        for col in ["Corte Texto", "Corte", "Fecha de Corte Texto", "Fecha de Corte"]:
+            if col in df.columns:
+                serie = df[col].dropna().astype(str).map(lambda x: arreglar_mojibake(x).strip())
+                serie = serie[(serie != "") & (serie.str.upper() != "NAT") & (serie.str.upper() != "SIN FECHA")]
+                if not serie.empty:
+                    valor = serie.iloc[-1]
+                    if col == "Corte":
+                        valor_fmt = formatear_corte_plazo(valor)
+                        return valor_fmt or valor
+                    if col == "Fecha de Corte":
+                        return formatear_fecha(valor)
+                    return valor
+    return default
+
 def _sumar_columna(df: pd.DataFrame, columna: str) -> float:
     if df is None or df.empty or columna not in df.columns:
         return 0.0
@@ -3309,6 +3332,8 @@ def construir_comentario_ia_mapa(
 ) -> str:
     if df_contexto is None or df_contexto.empty:
         return ""
+
+    fecha_sel = obtener_corte_desde_base(df_contexto, fecha_sel)
 
     alcance = _nombre_alcance_mapa(df_contexto)
     total = _sumar_columna(df_contexto, "Distribuidoras Totales")
@@ -3366,7 +3391,6 @@ def construir_comentario_ia_mapa(
 
     return f"""
 <div class="ai-panel">
-    <h3>Comentario IA del mapa</h3>
     <p>
         Al corte <b>{fecha_sel}</b>, el mapa de <b>{nombre_valera}</b> está leyendo <b>{alcance}</b> a nivel <b>{nivel_vista}</b>.
         La selección concentra <b>{formato_numero(total)}</b> distribuidoras, con <b>{formato_numero(corriente)}</b> al corriente,
@@ -3394,11 +3418,13 @@ def construir_comentario_ia_tabla_resumen(
     modo_tabla: str,
     texto_busqueda: str,
     fecha_sel: str,
+    df_fuente: pd.DataFrame | None = None,
 ) -> str:
+    fecha_sel = obtener_corte_desde_base(df_fuente if df_fuente is not None else resumen_tabla, fecha_sel)
+
     if resumen_tabla is None or resumen_tabla.empty:
         return f"""
 <div class="ai-panel">
-    <h3>Comentario IA de la tabla</h3>
     <p>No hay registros visibles para la tabla con los filtros actuales. Revisa el buscador o cambia el nivel de resumen.</p>
 </div>
 """
@@ -3435,7 +3461,6 @@ def construir_comentario_ia_tabla_resumen(
 
     return f"""
 <div class="ai-panel">
-    <h3>Comentario IA de la tabla inferior</h3>
     <p>
         Al corte <b>{fecha_sel}</b>, la tabla visible por <b>{nivel_vista}</b> resume <b>{len(resumen_tabla):,}</b> registros. {filtro}
         En conjunto concentra <b>{formato_numero(total)}</b> distribuidoras, con calidad de cartera de <b>{calidad:,.2f}%</b>
@@ -5526,6 +5551,8 @@ def construir_mapa_estado_plazo_composicion(
     if not corte_actual:
         corte_actual = obtener_corte_visible_plazo()
 
+    st.session_state["corte_plazo_composicion_actual"] = corte_actual
+
     titulo_corte = f"Corte plazo {corte_actual}" if corte_actual else "Corte plazo no disponible"
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
@@ -5826,11 +5853,15 @@ def mostrar_mapa(valera_param: str):
 
         st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
 
+    fecha_mapa_ia = fecha_sel
+    if estado_sel and (es_mexico or es_peru) and st.session_state.get("vista_detalle_estado_valeras", "Estructura") == "Plazo y composición":
+        fecha_mapa_ia = st.session_state.get("corte_plazo_composicion_actual", fecha_sel) or fecha_sel
+
     mostrar_comentario_ia_mapa(
         df_contexto=df_resumen_base,
         df_mapa=df_mapa_previo,
         nombre_valera=nombre_valera,
-        fecha_sel=fecha_sel,
+        fecha_sel=fecha_mapa_ia,
         nivel_vista=nivel_vista,
         variable_tamano=variable_tamano,
         tipo_mapa=tipo_mapa,
@@ -6070,6 +6101,7 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         modo_tabla=modo_tabla,
         texto_busqueda=texto_busqueda,
         fecha_sel=fecha_sel,
+        df_fuente=df_resumen_base,
     )
 
     mostrar_tabla_variacion(
