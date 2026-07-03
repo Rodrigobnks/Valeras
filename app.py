@@ -5059,7 +5059,7 @@ def renderizar_selector_plazo_y_kpis(
             unsafe_allow_html=True,
         )
         st.button(
-            f"Cambiar {titulo}",
+            " ",
             key=f"btn_{key}",
             type="tertiary",
             use_container_width=True,
@@ -5197,30 +5197,71 @@ def renderizar_selector_plazo_y_kpis(
     transform: translateY(-1px);
 }}
 
-div[data-testid="stButton"] > button[kind="tertiary"] {{
+div[data-testid="stButton"] > button[kind="tertiary"],
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"],
+div[data-testid="stButton"] > button:has(p:empty),
+div[data-testid="stButton"] > button:has(p span:empty) {{
     margin-top: -82px;
     min-height: 82px;
     height: 82px;
     width: 100%;
-    padding: 0;
+    padding: 0 !important;
     background: transparent !important;
     border: 0 !important;
     box-shadow: none !important;
     color: transparent !important;
-    opacity: 0.01;
+    opacity: 0.01 !important;
+    position: relative;
+    z-index: 5;
 }}
 
-div[data-testid="stButton"] > button[kind="tertiary"] p {{
+div[data-testid="stButton"] > button[kind="tertiary"] p,
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"] p,
+div[data-testid="stButton"] > button[kind="tertiary"] span,
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"] span {{
     color: transparent !important;
+    opacity: 0 !important;
 }}
 
 div[data-testid="stButton"] > button[kind="tertiary"]:hover,
 div[data-testid="stButton"] > button[kind="tertiary"]:focus,
-div[data-testid="stButton"] > button[kind="tertiary"]:active {{
+div[data-testid="stButton"] > button[kind="tertiary"]:active,
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:hover,
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:focus,
+div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:active {{
     background: transparent !important;
     border: 0 !important;
     box-shadow: none !important;
     color: transparent !important;
+}}
+
+.selector-tarjeta-opciones {{
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 16px;
+    background: rgba(255,255,255,0.98);
+    box-shadow: 0 12px 26px rgba(12, 33, 74, 0.08);
+}}
+
+.selector-tarjeta-opciones div[data-testid="stButton"] > button {{
+    margin-top: 0 !important;
+    min-height: 40px !important;
+    height: auto !important;
+    opacity: 1 !important;
+    color: {COLOR_PRIMARIO} !important;
+    border: 1px solid {COLOR_BORDE} !important;
+    border-radius: 12px !important;
+    background: rgba(255,255,255,0.96) !important;
+    box-shadow: none !important;
+    position: static !important;
+    z-index: auto !important;
+}}
+
+.selector-tarjeta-opciones div[data-testid="stButton"] > button p,
+.selector-tarjeta-opciones div[data-testid="stButton"] > button span {{
+    color: inherit !important;
+    opacity: 1 !important;
 }}
 </style>
 """,
