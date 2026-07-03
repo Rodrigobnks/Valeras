@@ -5053,13 +5053,24 @@ def renderizar_selector_plazo_y_kpis(
         format_func=lambda x: x,
         help_text: str = "",
     ):
-        # La tarjeta funciona como selector al tocarla, sin menú desplegable ni flecha.
-        # Cada clic avanza a la siguiente opción disponible y conserva la misma lógica
-        # visual de las tarjetas KPI de Plazo y composición.
-        etiqueta = f"{titulo}\n{valor_visible}"
+        # Se muestra una tarjeta HTML con el mismo formato visual que los KPI.
+        # Encima se coloca un botón transparente: la tarjeta conserva el diseño,
+        # no aparece flecha ni menú, y cada clic avanza a la siguiente opción.
+        titulo_html = str(titulo).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        valor_html = str(valor_visible).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        st.markdown(
+            f"""
+            <div class='kpi-plazo-card kpi-plazo-card-clickable'>
+                <div class='kpi-plazo-label'>{titulo_html}</div>
+                <div class='kpi-plazo-value'>{valor_html}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.button(
-            etiqueta,
+            f"Cambiar {titulo}",
             key=f"btn_{key}",
+            type="tertiary",
             use_container_width=True,
             help=help_text,
             on_click=avanzar_opcion_session_state,
@@ -5166,32 +5177,41 @@ def renderizar_selector_plazo_y_kpis(
     margin-bottom: 8px;
 }}
 
-div[data-testid="stButton"] > button[kind="secondary"] {{
-    background: rgba(255,255,255,0.96);
-    border: 1px solid {COLOR_BORDE};
-    border-radius: 16px;
-    min-height: 82px;
-    padding: 12px 14px;
-    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
-    color: {COLOR_PRIMARIO};
-    font-weight: 900;
-    line-height: 1.12;
-    white-space: pre-line;
-    text-align: left;
-    justify-content: flex-start;
+.kpi-plazo-card-clickable {{
+    cursor: pointer;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }}
 
-div[data-testid="stButton"] > button[kind="secondary"] p {{
-    white-space: pre-line;
-    font-size: clamp(18px, 1.25vw, 26px);
-    font-weight: 900;
-    line-height: 1.08;
-    color: {COLOR_PRIMARIO};
-}}
-
-div[data-testid="stButton"] > button[kind="secondary"]:hover {{
+.kpi-plazo-card-clickable:hover {{
     border-color: {COLOR_PRIMARIO};
     box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12);
+    transform: translateY(-1px);
+}}
+
+div[data-testid="stButton"] > button[kind="tertiary"] {{
+    margin-top: -82px;
+    min-height: 82px;
+    height: 82px;
+    width: 100%;
+    padding: 0;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    opacity: 0.01;
+}}
+
+div[data-testid="stButton"] > button[kind="tertiary"] p {{
+    color: transparent !important;
+}}
+
+div[data-testid="stButton"] > button[kind="tertiary"]:hover,
+div[data-testid="stButton"] > button[kind="tertiary"]:focus,
+div[data-testid="stButton"] > button[kind="tertiary"]:active {{
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: transparent !important;
 }}
 </style>
 """,
