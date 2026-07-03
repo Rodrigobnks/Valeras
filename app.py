@@ -5041,12 +5041,21 @@ def renderizar_selector_plazo_y_kpis(
         format_func=lambda x: x,
         help_text: str = "",
     ):
-        # La tarjeta conserva el mismo formato visual de los KPI y el popover
-        # se abre directamente al tocarla, sin texto auxiliar ni flecha visible.
-        etiqueta_tarjeta = f"{titulo}\n\n{valor_visible}"
+        # Se pinta primero una tarjeta KPI normal. Encima se coloca un popover
+        # transparente del mismo tamaño: visualmente no aparece flecha ni texto
+        # de botón, pero al tocar la tarjeta se despliegan las opciones.
+        st.markdown(
+            f"""
+<div class="kpi-plazo-card kpi-plazo-card-clickable">
+    <div class="kpi-plazo-label">{titulo}</div>
+    <div class="kpi-plazo-value">{valor_visible}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
         if hasattr(st, "popover"):
-            with st.popover(etiqueta_tarjeta, use_container_width=True, help=help_text):
+            with st.popover(" ", use_container_width=True, help=help_text):
                 st.markdown("<div class='selector-tarjeta-opciones-popover'>", unsafe_allow_html=True)
                 for i, opcion in enumerate(opciones_disponibles):
                     etiqueta = format_func(opcion)
@@ -5064,7 +5073,6 @@ def renderizar_selector_plazo_y_kpis(
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            # Fallback para versiones antiguas de Streamlit: mantiene el cambio funcional.
             idx_actual = 0
             for i, opcion in enumerate(opciones_disponibles):
                 if opcion == st.session_state.get(key):
@@ -5258,53 +5266,37 @@ div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:active {
     opacity: 1 !important;
 }}
 
-/* Tarjeta desplegable profesional para Plazo y Corte */
+/* Capa invisible para abrir el popover desde la tarjeta KPI */
 div[data-testid="stPopover"] > button {{
-    background: rgba(255,255,255,0.96) !important;
-    border: 1px solid {COLOR_BORDE} !important;
-    border-radius: 16px !important;
-    padding: 12px 14px !important;
+    margin-top: -82px !important;
     min-height: 82px !important;
     height: 82px !important;
     width: 100% !important;
-    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07) !important;
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    justify-content: center !important;
-    text-align: left !important;
-    gap: 6px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    opacity: 0.01 !important;
+    position: relative !important;
+    z-index: 10 !important;
 }}
 
 div[data-testid="stPopover"] > button:hover,
-div[data-testid="stPopover"] > button:focus {{
-    border-color: {COLOR_PRIMARIO} !important;
-    box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12) !important;
-    background: rgba(255,255,255,0.98) !important;
+div[data-testid="stPopover"] > button:focus,
+div[data-testid="stPopover"] > button:active {{
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: transparent !important;
 }}
 
-div[data-testid="stPopover"] > button svg {{
+div[data-testid="stPopover"] > button svg,
+div[data-testid="stPopover"] > button p,
+div[data-testid="stPopover"] > button span {{
     display: none !important;
-}}
-
-div[data-testid="stPopover"] > button p {{
-    margin: 0 !important;
-    color: {COLOR_TEXTO} !important;
-    font-size: 13px !important;
-    font-weight: 700 !important;
-    opacity: 0.86 !important;
-    line-height: 1.08 !important;
-}}
-
-div[data-testid="stPopover"] > button p:last-child,
-div[data-testid="stPopover"] > button div:last-child p:last-child {{
-    color: {COLOR_PRIMARIO} !important;
-    font-size: clamp(18px, 1.45vw, 30px) !important;
-    font-weight: 900 !important;
-    opacity: 1 !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    color: transparent !important;
+    opacity: 0 !important;
 }}
 
 .selector-tarjeta-opciones-popover {{
