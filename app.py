@@ -5053,30 +5053,18 @@ def renderizar_selector_plazo_y_kpis(
         format_func=lambda x: x,
         help_text: str = "",
     ):
+        # La tarjeta funciona como selector al tocarla, sin menú desplegable ni flecha.
+        # Cada clic avanza a la siguiente opción disponible y conserva la misma lógica
+        # visual de las tarjetas KPI de Plazo y composición.
         etiqueta = f"{titulo}\n{valor_visible}"
-        if hasattr(st, "popover"):
-            with st.popover(etiqueta, use_container_width=True, help=help_text):
-                st.markdown(f"<div class='plazo-popover-title'>{titulo}</div>", unsafe_allow_html=True)
-                for opcion in opciones_disponibles:
-                    texto_opcion = format_func(opcion)
-                    activo = st.session_state.get(key) == opcion
-                    prefijo = "✓ " if activo else ""
-                    if st.button(
-                        f"{prefijo}{texto_opcion}",
-                        key=f"{key}_{limpiar_texto(str(opcion))}_opcion",
-                        use_container_width=True,
-                    ):
-                        seleccionar_opcion_session_state(key, opcion)
-                        st.rerun()
-        else:
-            st.button(
-                etiqueta,
-                key=f"btn_{key}",
-                use_container_width=True,
-                help=help_text,
-                on_click=avanzar_opcion_session_state,
-                args=(key, opciones_disponibles),
-            )
+        st.button(
+            etiqueta,
+            key=f"btn_{key}",
+            use_container_width=True,
+            help=help_text,
+            on_click=avanzar_opcion_session_state,
+            args=(key, opciones_disponibles),
+        )
 
     st.markdown(
         f"""
@@ -5178,20 +5166,29 @@ def renderizar_selector_plazo_y_kpis(
     margin-bottom: 8px;
 }}
 
-div[data-testid="stPopover"] > button,
 div[data-testid="stButton"] > button[kind="secondary"] {{
     background: rgba(255,255,255,0.96);
     border: 1px solid {COLOR_BORDE};
     border-radius: 16px;
     min-height: 82px;
+    padding: 12px 14px;
     box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
     color: {COLOR_PRIMARIO};
     font-weight: 900;
     line-height: 1.12;
     white-space: pre-line;
+    text-align: left;
+    justify-content: flex-start;
 }}
 
-div[data-testid="stPopover"] > button:hover,
+div[data-testid="stButton"] > button[kind="secondary"] p {{
+    white-space: pre-line;
+    font-size: clamp(18px, 1.25vw, 26px);
+    font-weight: 900;
+    line-height: 1.08;
+    color: {COLOR_PRIMARIO};
+}}
+
 div[data-testid="stButton"] > button[kind="secondary"]:hover {{
     border-color: {COLOR_PRIMARIO};
     box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12);
