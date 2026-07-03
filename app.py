@@ -4437,17 +4437,21 @@ def construir_mapa_estados_mexico(
         if puntos:
             punto = puntos[0]
 
-            # El mapa nacional ya NO entra al detalle por estado/departamento.
-            # Sólo abre detalle al dar clic en una bolita de sucursal, tomando su Subdirección.
-            # Los polígonos políticos se conservan como contexto visual, pero no navegan.
-            estado_geo = punto.get("location")
-            if estado_geo:
+            # El mapa general NO navega por estado/departamento.
+            # Sólo abre detalle cuando el clic viene de una bolita de sucursal.
+            # Las bolitas traen customdata completo de sucursal; los polígonos de estado
+            # traen customdata corto o location, por eso se ignoran.
+            customdata = punto.get("customdata")
+            es_bolita_sucursal = (
+                customdata is not None
+                and isinstance(customdata, (list, tuple))
+                and len(customdata) >= 16
+            )
+
+            if not es_bolita_sucursal:
                 return
 
-            subdireccion_real = None
-            customdata = punto.get("customdata")
-            if customdata and len(customdata) > 1:
-                subdireccion_real = customdata[1]
+            subdireccion_real = customdata[1] if len(customdata) > 1 else None
 
             if subdireccion_real:
                 st.session_state["ia_mapa_ultimo_click"] = subdireccion_real
@@ -4534,17 +4538,21 @@ def construir_mapa_estados_peru(
         if puntos:
             punto = puntos[0]
 
-            # El mapa nacional ya NO entra al detalle por estado/departamento.
-            # Sólo abre detalle al dar clic en una bolita de sucursal, tomando su Subdirección.
-            # Los polígonos políticos se conservan como contexto visual, pero no navegan.
-            estado_geo = punto.get("location")
-            if estado_geo:
+            # El mapa general NO navega por estado/departamento.
+            # Sólo abre detalle cuando el clic viene de una bolita de sucursal.
+            # Las bolitas traen customdata completo de sucursal; los polígonos de estado
+            # traen customdata corto o location, por eso se ignoran.
+            customdata = punto.get("customdata")
+            es_bolita_sucursal = (
+                customdata is not None
+                and isinstance(customdata, (list, tuple))
+                and len(customdata) >= 16
+            )
+
+            if not es_bolita_sucursal:
                 return
 
-            subdireccion_real = None
-            customdata = punto.get("customdata")
-            if customdata and len(customdata) > 1:
-                subdireccion_real = customdata[1]
+            subdireccion_real = customdata[1] if len(customdata) > 1 else None
 
             if subdireccion_real:
                 st.session_state["ia_mapa_ultimo_click"] = subdireccion_real
@@ -5529,30 +5537,27 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
 
     estado_label = str(estado)
 
-    if "Estado" in df_plot.columns:
-        total = agg_level(["Estado"])
-        if not total.empty:
-            total["Estado"] = estado_label
-    else:
-        total = pd.DataFrame()
-
-    if total.empty:
-        total = pd.DataFrame(
-            [{
-                "Estado": estado_label,
-                "Capital": df_plot["Capital"].sum(),
-                "Interes": df_plot["Interes"].sum(),
-                "Total": df_plot["Total"].sum(),
-                "Ganancia": df_plot["Ganancia"].sum(),
-                "Vales": df_plot["Vales"].sum(),
-                "Tasa de Ganancia": (
-                    df_plot["Interes"].sum() / df_plot["Capital"].sum() * 100
-                    if df_plot["Capital"].sum() else 0
-                ),
-                "Plazo Texto": plazo_display_desde_valores(df_plot["Plazo"]),
-                "Corte": next((c for c in df_plot["Corte Texto"].dropna().astype(str).unique().tolist() if c), ""),
-            }]
-        )
+    # El nodo raíz debe representar TODO el universo visible.
+    # Antes, cuando el detalle se abría por Subdirección y esa Subdirección tenía
+    # más de un Estado, se tomaba sólo el primer Estado como raíz; eso hacía que
+    # el valor del padre fuera menor que la suma de sus hijos y Plotly podía no
+    # renderizar el treemap. Ahora la raíz siempre suma toda la base filtrada.
+    total = pd.DataFrame(
+        [{
+            "Estado": estado_label,
+            "Capital": df_plot["Capital"].sum(),
+            "Interes": df_plot["Interes"].sum(),
+            "Total": df_plot["Total"].sum(),
+            "Ganancia": df_plot["Ganancia"].sum(),
+            "Vales": df_plot["Vales"].sum(),
+            "Tasa de Ganancia": (
+                df_plot["Interes"].sum() / df_plot["Capital"].sum() * 100
+                if df_plot["Capital"].sum() else 0
+            ),
+            "Plazo Texto": plazo_display_desde_valores(df_plot["Plazo"]),
+            "Corte": next((c for c in df_plot["Corte Texto"].dropna().astype(str).unique().tolist() if c), ""),
+        }]
+    )
 
     sub = agg_level(["Subdirección"])
     zona = agg_level(["Subdirección", "Zona"])
@@ -6083,6 +6088,13 @@ def mostrar_mapa(valera_param: str):
     estado_sel = get_query_param("estado", "")
     estado_detalle_sel = "Todos"
 
+    # Compatibilidad limpia: si queda un enlace viejo con ?estado= pero sin
+    # ?subdireccion=, se regresa al mapa general para evitar que el clic por
+    # estado vuelva a abrir detalle.
+    if estado_sel and not subdireccion_sel:
+        set_query_params(valera=valera_param)
+        st.rerun()
+
     df_resumen_base = df_filtrado.copy()
     if subdireccion_sel:
         df_subdireccion = df_filtrado[
@@ -6215,7 +6227,7 @@ def mostrar_mapa(valera_param: str):
     es_mexico = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("MÉXICO")
     es_peru = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("PERÚ")
 
-    detalle_estado_activo = bool((subdireccion_sel or estado_sel) and (es_mexico or es_peru))
+    detalle_estado_activo = bool(subdireccion_sel and (es_mexico or es_peru))
     elementos_estructura_actual = int(df_mapa_previo[nivel_vista].nunique()) if nivel_vista in df_mapa_previo.columns else 0
     mostrar_top_bottom_detalle = (not detalle_estado_activo) or elementos_estructura_actual >= 20
 
@@ -6307,42 +6319,6 @@ def mostrar_mapa(valera_param: str):
                     destacar_valores=valores_destacados_mapa,
                     tipo_mapa=tipo_mapa,
                 )
-    elif estado_sel and (es_mexico or es_peru):
-        nombre_pais_volver = "México" if es_mexico else "Perú"
-        st.markdown(
-            f"""
-<a class="back-link" href="?valera={valera_param}" target="_self">← Volver al mapa de {nombre_pais_volver}</a>
-""",
-            unsafe_allow_html=True,
-        )
-
-        vista_detalle_estado = selector_botones(
-            "Vista del detalle",
-            ["Estructura", "Plazo y composición"],
-            "vista_detalle_estado_valeras",
-            "Estructura",
-        )
-
-        if vista_detalle_estado == "Plazo y composición":
-            construir_mapa_estado_plazo_composicion(
-                df=df_filtrado,
-                nombre_valera=nombre_valera,
-                estado=estado_sel,
-                fecha_texto=fecha_sel,
-                pais=pais_actual,
-            )
-        else:
-            construir_mapa_estado_burbujas(
-                df=df_filtrado,
-                nombre_valera=nombre_valera,
-                estado=estado_sel,
-                variable_tamano=variable_tamano,
-                fecha_texto=fecha_sel,
-                pais=pais_actual,
-                destacar_nivel=nivel_vista,
-                destacar_valores=valores_destacados_mapa,
-                tipo_mapa=tipo_mapa,
-            )
     elif es_mexico:
         construir_mapa_estados_mexico(
             df=df_filtrado,
