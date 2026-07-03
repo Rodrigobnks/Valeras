@@ -1703,7 +1703,14 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
         columnas_uso = ["Corte"] + columnas_uso
 
     df = df[columnas_uso].copy()
-    df = filtrar_ultimo_corte_plazo(df)
+
+    # Se conservan todos los cortes para que la tarjeta Corte pueda cambiar
+    # la lectura del treemap sin depender del encabezado general ni del último corte.
+    if "Corte" not in df.columns:
+        df["Corte"] = ""
+    df["Corte"] = df["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
+    df["Corte Fecha"] = df["Corte"].map(extraer_fecha_corte)
+    df["Corte Texto"] = df["Corte"].map(formatear_corte_plazo)
 
     for col in ["Subdirección", "Zona", "Sucursal"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip().replace("", "Sin dato")
@@ -4657,8 +4664,8 @@ def texto_guia_interaccion_mapa_financiero() -> str:
         "<b>Color del bloque:</b> representa la <b>tasa de ganancia</b>. Los tonos bajos señalan menor rentabilidad relativa; "
         "los tonos altos señalan mayor rentabilidad relativa. Así puedes detectar estructuras grandes con baja rentabilidad "
         "o estructuras pequeñas con buen desempeño.<br><br>"
-        "<b>Plazo:</b> arriba del treemap tienes una tarjeta desplegable para mover la gráfica por plazo. "
-        "Al elegir un plazo, el treemap y los KPIs se recalculan únicamente con ese plazo seleccionado. "
+        "<b>Plazo:</b> arriba del treemap puedes tocar la tarjeta Plazo para cambiar la lectura. "
+        "Al elegir un plazo, el treemap y los KPIs se recalculan únicamente con ese plazo seleccionado. También puedes tocar la tarjeta Corte para cambiar entre cortes disponibles. "
         "El plazo se muestra como <b>plazo ponderado por capital</b>, por lo que refleja mejor la exposición real del dinero "
         "que un promedio simple. Una sucursal con plazo alto recupera capital más lento; si además tiene baja tasa de ganancia, "
         "conviene revisarla con prioridad.<br><br>"
@@ -4970,18 +4977,106 @@ def renderizar_selector_plazo_y_kpis(
 
     if "Plazo" not in df_base.columns:
         df_base["Plazo"] = 0
+    if "Capital" not in df_base.columns:
+        df_base["Capital"] = 0
+    if "Corte" not in df_base.columns:
+        df_base["Corte"] = ""
+    if "Corte Texto" not in df_base.columns:
+        df_base["Corte Texto"] = df_base["Corte"].map(formatear_corte_plazo)
 
     df_base["Plazo"] = pd.to_numeric(df_base["Plazo"], errors="coerce").fillna(0)
+    df_base["Capital"] = pd.to_numeric(df_base["Capital"], errors="coerce").fillna(0)
+    df_base["Corte"] = df_base["Corte"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
+    df_base["Corte Texto"] = df_base["Corte Texto"].fillna("").astype(str).map(lambda x: arreglar_mojibake(x).strip())
+    df_base.loc[df_base["Corte Texto"] == "", "Corte Texto"] = df_base.loc[df_base["Corte Texto"] == "", "Corte"].map(formatear_corte_plazo)
+    df_base["__Corte Fecha Orden"] = df_base["Corte Texto"].map(extraer_fecha_corte)
+
+    cortes_df = (
+        df_base[df_base["Capital"] > 0][["Corte Texto", "__Corte Fecha Orden"]]
+        .dropna(subset=["Corte Texto"])
+        .drop_duplicates()
+        .copy()
+    )
+    cortes_df = cortes_df[cortes_df["Corte Texto"].astype(str).str.strip() != ""]
+    if cortes_df.empty:
+        cortes_opciones = ["Sin corte"]
+    else:
+        cortes_df["__orden"] = cortes_df["__Corte Fecha Orden"].fillna(pd.Timestamp.min)
+        cortes_df = cortes_df.sort_values("__orden", ascending=False)
+        cortes_opciones = cortes_df["Corte Texto"].astype(str).tolist()
+
+    estado_norm = limpiar_texto(estado)
+    key_corte = f"selector_corte_plazo_composicion_{estado_norm}"
+    key_plazo = f"selector_plazo_composicion_{estado_norm}"
+
+    if key_corte not in st.session_state or st.session_state[key_corte] not in cortes_opciones:
+        st.session_state[key_corte] = cortes_opciones[0]
+
+    corte_sel = st.session_state[key_corte]
+    if corte_sel == "Sin corte":
+        df_corte = df_base.copy()
+    else:
+        df_corte = df_base[df_base["Corte Texto"] == corte_sel].copy()
 
     plazos = (
-        df_base.loc[df_base["Capital"].fillna(0) > 0, "Plazo"]
+        df_corte.loc[df_corte["Capital"] > 0, "Plazo"]
         .dropna()
         .sort_values()
         .unique()
         .tolist()
     )
-
     opciones = ["Todos"] + plazos
+
+    if key_plazo not in st.session_state or st.session_state[key_plazo] not in opciones:
+        st.session_state[key_plazo] = opciones[0]
+
+    plazo_sel = st.session_state[key_plazo]
+
+    def avanzar_opcion_session_state(key: str, valores: list):
+        if not valores:
+            return
+        actual = st.session_state.get(key, valores[0])
+        try:
+            idx = valores.index(actual)
+        except ValueError:
+            idx = -1
+        st.session_state[key] = valores[(idx + 1) % len(valores)]
+
+    def seleccionar_opcion_session_state(key: str, valor):
+        st.session_state[key] = valor
+
+    def renderizar_tarjeta_selector(
+        titulo: str,
+        valor_visible: str,
+        key: str,
+        opciones_disponibles: list,
+        format_func=lambda x: x,
+        help_text: str = "",
+    ):
+        etiqueta = f"{titulo}\n{valor_visible}"
+        if hasattr(st, "popover"):
+            with st.popover(etiqueta, use_container_width=True, help=help_text):
+                st.markdown(f"<div class='plazo-popover-title'>{titulo}</div>", unsafe_allow_html=True)
+                for opcion in opciones_disponibles:
+                    texto_opcion = format_func(opcion)
+                    activo = st.session_state.get(key) == opcion
+                    prefijo = "✓ " if activo else ""
+                    if st.button(
+                        f"{prefijo}{texto_opcion}",
+                        key=f"{key}_{limpiar_texto(str(opcion))}_opcion",
+                        use_container_width=True,
+                    ):
+                        seleccionar_opcion_session_state(key, opcion)
+                        st.rerun()
+        else:
+            st.button(
+                etiqueta,
+                key=f"btn_{key}",
+                use_container_width=True,
+                help=help_text,
+                on_click=avanzar_opcion_session_state,
+                args=(key, opciones_disponibles),
+            )
 
     st.markdown(
         f"""
@@ -5075,73 +5170,92 @@ def renderizar_selector_plazo_y_kpis(
     font-weight: 800;
     line-height: 1.25;
 }}
+
+.plazo-popover-title {{
+    color: {COLOR_PRIMARIO};
+    font-size: 13px;
+    font-weight: 900;
+    margin-bottom: 8px;
+}}
+
+div[data-testid="stPopover"] > button,
+div[data-testid="stButton"] > button[kind="secondary"] {{
+    background: rgba(255,255,255,0.96);
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 16px;
+    min-height: 82px;
+    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
+    color: {COLOR_PRIMARIO};
+    font-weight: 900;
+    line-height: 1.12;
+    white-space: pre-line;
+}}
+
+div[data-testid="stPopover"] > button:hover,
+div[data-testid="stButton"] > button[kind="secondary"]:hover {{
+    border-color: {COLOR_PRIMARIO};
+    box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12);
+}}
 </style>
 """,
         unsafe_allow_html=True,
     )
 
-    with st.expander("Plazo", expanded=True):
-        corte_base = obtener_corte_visible_plazo()
-        if not corte_base and "Corte Texto" in df_base.columns:
-            corte_base = next((c for c in df_base["Corte Texto"].dropna().astype(str).unique().tolist() if c), "")
-        if not corte_base and "Corte" in df_base.columns:
-            corte_base = next((formatear_corte_plazo(c) for c in df_base["Corte"].dropna().astype(str).unique().tolist() if str(c).strip()), "")
+    if plazo_sel == "Todos":
+        df_filtrado = df_corte.copy()
+        plazo_texto = "Todos"
+    else:
+        plazo_num = float(pd.to_numeric(plazo_sel, errors="coerce"))
+        df_filtrado = df_corte[df_corte["Plazo"] == plazo_num].copy()
+        plazo_texto = formatear_plazo_opcion(plazo_sel)
 
-        cols = st.columns([1.22, 0.78, 0.90, 0.86, 0.98, 0.98, 0.82, 0.72])
+    df_metricas = filtrar_df_por_nodo_treemap(df_filtrado, selected_node_id)
+    if df_metricas.empty:
+        df_metricas = df_filtrado.copy()
+        selected_node_id = None
+
+    metricas = calcular_metricas_plazo(df_metricas)
+    metricas["Corte"] = corte_sel if corte_sel != "Sin corte" else metricas.get("Corte", "")
+
+    with st.expander("Plazo", expanded=True):
+        cols = st.columns([0.82, 0.98, 0.86, 0.98, 0.98, 0.82, 0.72])
 
         with cols[0]:
-            plazo_sel = st.selectbox(
-                "Mover gráfica por plazo",
+            renderizar_tarjeta_selector(
+                "Plazo",
+                plazo_texto,
+                key_plazo,
                 opciones,
                 format_func=formatear_plazo_opcion,
-                key=f"selector_plazo_composicion_{limpiar_texto(estado)}",
+                help_text="Toca para elegir otro plazo.",
             )
-            st.markdown(
-                "<div class='plazo-filter-note'>El treemap se recalcula con el plazo seleccionado. Las tarjetas también responden al plazo y al bloque que selecciones en el treemap.</div>",
-                unsafe_allow_html=True,
-            )
-
-        if plazo_sel == "Todos":
-            df_filtrado = df_base.copy()
-            plazo_texto = "Todos"
-        else:
-            plazo_num = float(pd.to_numeric(plazo_sel, errors="coerce"))
-            df_filtrado = df_base[df_base["Plazo"] == plazo_num].copy()
-            plazo_texto = formatear_plazo_opcion(plazo_sel)
-
-        df_metricas = filtrar_df_por_nodo_treemap(df_filtrado, selected_node_id)
-        if df_metricas.empty:
-            df_metricas = df_filtrado.copy()
-            selected_node_id = None
-
-        metricas = calcular_metricas_plazo(df_metricas)
 
         with cols[1]:
-            renderizar_tarjeta_kpi_plazo("Plazo", metricas["Plazo"])
-
-        with cols[2]:
-            st.markdown(
-                f"""
-<div class="corte-plazo-card">
-    <div class="corte-plazo-label">Corte</div>
-    <div class="corte-plazo-value">{corte_base if corte_base else "Sin corte"}</div>
-</div>
-""",
-                unsafe_allow_html=True,
+            renderizar_tarjeta_selector(
+                "Corte",
+                corte_sel if corte_sel != "Sin corte" else "Sin corte",
+                key_corte,
+                cortes_opciones,
+                format_func=lambda x: x,
+                help_text="Toca para elegir otro corte.",
             )
 
-        with cols[3]:
+        with cols[2]:
             renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
             st.markdown("<div class='plazo-kpi-note'>Capital / Vales</div>", unsafe_allow_html=True)
-        with cols[4]:
+        with cols[3]:
             renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
-        with cols[5]:
+        with cols[4]:
             renderizar_tarjeta_kpi_plazo("Interés", formato_moneda(metricas["Interes"]))
-        with cols[6]:
+        with cols[5]:
             renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
-        with cols[7]:
+        with cols[6]:
             renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
 
+        st.markdown(
+            "<div class='plazo-filter-note'>Toca las tarjetas Plazo o Corte para cambiar la lectura. El treemap y las tarjetas se recalculan con esa selección.</div>",
+            unsafe_allow_html=True,
+        )
         st.markdown(
             f"<div class='treemap-selection-note'>Tarjetas calculadas por clic sobre: {etiqueta_nodo_treemap(selected_node_id)}</div>",
             unsafe_allow_html=True,
@@ -5564,7 +5678,7 @@ def construir_mapa_estado_plazo_composicion(
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
         clickmode="event+select",
-        uirevision=f"{estado}-{plazo_texto}",
+        uirevision=f"{estado}-{corte_actual}-{plazo_texto}",
     )
 
     renderizar_guia_interaccion_mapa_financiero()
