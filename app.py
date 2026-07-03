@@ -5030,12 +5030,8 @@ def renderizar_selector_plazo_y_kpis(
 
     plazo_sel = st.session_state[key_plazo]
 
-    def alternar_selector_tarjeta(open_key: str):
-        st.session_state[open_key] = not st.session_state.get(open_key, False)
-
-    def seleccionar_opcion_session_state(key: str, valor, open_key: str):
+    def seleccionar_opcion_session_state(key: str, valor):
         st.session_state[key] = valor
-        st.session_state[open_key] = False
 
     def renderizar_tarjeta_selector(
         titulo: str,
@@ -5045,46 +5041,44 @@ def renderizar_selector_plazo_y_kpis(
         format_func=lambda x: x,
         help_text: str = "",
     ):
-        titulo_html = str(titulo).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        valor_html = str(valor_visible).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        open_key = f"open_{key}"
+        # La tarjeta conserva el mismo formato visual de los KPI y el popover
+        # se abre directamente al tocarla, sin texto auxiliar ni flecha visible.
+        etiqueta_tarjeta = f"{titulo}\n\n{valor_visible}"
 
-        st.markdown(
-            f"""
-            <div class='kpi-plazo-card kpi-plazo-card-clickable'>
-                <div class='kpi-plazo-label'>{titulo_html}</div>
-                <div class='kpi-plazo-value'>{valor_html}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.button(
-            " ",
-            key=f"btn_{key}",
-            type="tertiary",
-            use_container_width=True,
-            help=help_text,
-            on_click=alternar_selector_tarjeta,
-            args=(open_key,),
-        )
-
-        if st.session_state.get(open_key, False):
-            st.markdown("<div class='selector-tarjeta-opciones'>", unsafe_allow_html=True)
+        if hasattr(st, "popover"):
+            with st.popover(etiqueta_tarjeta, use_container_width=True, help=help_text):
+                st.markdown("<div class='selector-tarjeta-opciones-popover'>", unsafe_allow_html=True)
+                for i, opcion in enumerate(opciones_disponibles):
+                    etiqueta = format_func(opcion)
+                    if pd.isna(opcion) if not isinstance(opcion, str) else False:
+                        etiqueta = "Sin dato"
+                    etiqueta = str(etiqueta)
+                    seleccionado = opcion == st.session_state.get(key)
+                    st.button(
+                        etiqueta,
+                        key=f"opt_{key}_{i}_{limpiar_texto(etiqueta)}",
+                        type="primary" if seleccionado else "secondary",
+                        use_container_width=True,
+                        on_click=seleccionar_opcion_session_state,
+                        args=(key, opcion),
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Fallback para versiones antiguas de Streamlit: mantiene el cambio funcional.
+            idx_actual = 0
             for i, opcion in enumerate(opciones_disponibles):
-                etiqueta = format_func(opcion)
-                if pd.isna(opcion) if not isinstance(opcion, str) else False:
-                    etiqueta = "Sin dato"
-                etiqueta = str(etiqueta)
-                seleccionado = opcion == st.session_state.get(key)
-                st.button(
-                    etiqueta,
-                    key=f"opt_{key}_{i}_{limpiar_texto(etiqueta)}",
-                    type="primary" if seleccionado else "secondary",
-                    use_container_width=True,
-                    on_click=seleccionar_opcion_session_state,
-                    args=(key, opcion, open_key),
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+                if opcion == st.session_state.get(key):
+                    idx_actual = i
+                    break
+            st.selectbox(
+                titulo,
+                opciones_disponibles,
+                index=idx_actual,
+                key=key,
+                format_func=format_func,
+                label_visibility="collapsed",
+                help=help_text,
+            )
 
     st.markdown(
         f"""
@@ -5263,6 +5257,66 @@ div[data-testid="stButton"] > button[data-testid="baseButton-tertiary"]:active {
     color: inherit !important;
     opacity: 1 !important;
 }}
+
+/* Tarjeta desplegable profesional para Plazo y Corte */
+div[data-testid="stPopover"] > button {
+    background: rgba(255,255,255,0.96) !important;
+    border: 1px solid {COLOR_BORDE} !important;
+    border-radius: 16px !important;
+    padding: 12px 14px !important;
+    min-height: 82px !important;
+    height: 82px !important;
+    width: 100% !important;
+    box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    text-align: left !important;
+    gap: 6px !important;
+}
+
+div[data-testid="stPopover"] > button:hover,
+div[data-testid="stPopover"] > button:focus {
+    border-color: {COLOR_PRIMARIO} !important;
+    box-shadow: 0 12px 26px rgba(12, 33, 74, 0.12) !important;
+    background: rgba(255,255,255,0.98) !important;
+}
+
+div[data-testid="stPopover"] > button svg {
+    display: none !important;
+}
+
+div[data-testid="stPopover"] > button p {
+    margin: 0 !important;
+    color: {COLOR_TEXTO} !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    opacity: 0.86 !important;
+    line-height: 1.08 !important;
+}
+
+div[data-testid="stPopover"] > button p:last-child,
+div[data-testid="stPopover"] > button div:last-child p:last-child {
+    color: {COLOR_PRIMARIO} !important;
+    font-size: clamp(18px, 1.45vw, 30px) !important;
+    font-weight: 900 !important;
+    opacity: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.selector-tarjeta-opciones-popover {
+    min-width: 220px;
+    padding: 2px 0 4px 0;
+}
+
+.selector-tarjeta-opciones-popover div[data-testid="stButton"] > button {
+    margin-top: 6px !important;
+    min-height: 38px !important;
+    border-radius: 12px !important;
+}
 </style>
 """,
         unsafe_allow_html=True,
