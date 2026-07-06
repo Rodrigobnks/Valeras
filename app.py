@@ -37,6 +37,7 @@ ARCHIVO_PLAZO_COMPOSICION = BASE_DIR / "Plazo y composicion de dispersión.csv"
 ARCHIVO_GEOJSON_MX = BASE_DIR / "mexico_estados.geojson"
 ARCHIVO_GEOJSON_PE = BASE_DIR / "peru_departamentos.geojson"
 ARCHIVO_GEOJSON_MUN_MX = BASE_DIR / "mexico_municipios.geojson"
+ARCHIVO_INTERPRETACION_NEGOCIO = BASE_DIR / "interpretacion_negocio_vales.md"
 
 
 # ======================================================
@@ -2994,6 +2995,66 @@ def mostrar_tabla_variacion(
 # ======================================================
 # COMENTARIOS TIPO IA / GUÍA DE INTERACCIÓN
 # ======================================================
+
+DOCUMENTO_INTERPRETACION_NEGOCIO_DEFAULT = """
+[BLOQUE:RESUMEN_CARTERA]
+La lectura debe conectar tamaño de base, calidad de cartera y mora. Una operación sana no sólo tiene más distribuidoras o más dispersión; debe sostener una proporción alta de distribuidoras al corriente y controlar el deterioro. Si la calidad cae o la mora gana peso, la prioridad es cobranza, contención y seguimiento por sucursal.
+[/BLOQUE]
+[BLOQUE:ACTIVIDAD_COMERCIAL]
+La dispersión representa capital entregado y los canjes representan operaciones realizadas. Un aumento de canjes con buena calidad indica expansión sana; un aumento de canjes con baja calidad puede señalar crecimiento riesgoso. El canje promedio permite entender el tamaño típico del crédito colocado.
+[/BLOQUE]
+[BLOQUE:MAPA_ESTRUCTURA]
+El mapa debe usarse para ubicar concentración territorial de oportunidad y riesgo. Los puntos con mayor volumen y buena calidad son fortalezas replicables. Los puntos con alto volumen y baja calidad son prioridades de cobranza, porque concentran impacto financiero y operativo.
+[/BLOQUE]
+[BLOQUE:TABLA_RESUMEN]
+La tabla permite priorizar decisiones. No debe leerse sólo como ranking: combina volumen, calidad, mora y dispersión para separar crecimiento sano, oportunidad comercial, focos de recuperación y zonas donde conviene contener colocación antes de acelerar.
+[/BLOQUE]
+[BLOQUE:PLAZO_COMPOSICION]
+En plazo y composición, capital es monto prestado, interés es ingreso financiero esperado, total es capital más interés, tasa de ganancia es rentabilidad esperada y vales es volumen de operaciones. Una tasa alta es positiva sólo si el capital mantiene recuperación controlada; si el capital se concentra, ese nodo debe vigilarse por su impacto.
+[/BLOQUE]
+[BLOQUE:HERRAMIENTAS]
+Las herramientas como quebranto, consideración, reestructura o robo son mecanismos de regularización y recuperación. No deben leerse como crecimiento comercial normal; sirven para contener deterioro, ordenar pagos y recuperar saldo.
+[/BLOQUE]
+"""
+
+
+@st.cache_data(show_spinner=False)
+def cargar_documento_interpretacion_negocio() -> str:
+    """Carga la base de conocimiento del negocio de vales desde un archivo Markdown.
+    Si el archivo no existe, usa una versión mínima integrada para que la app no falle.
+    """
+    try:
+        if ARCHIVO_INTERPRETACION_NEGOCIO.exists():
+            return ARCHIVO_INTERPRETACION_NEGOCIO.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return DOCUMENTO_INTERPRETACION_NEGOCIO_DEFAULT
+
+
+def obtener_bloque_interpretacion(nombre_bloque: str, fallback: str = "") -> str:
+    """Extrae un bloque [BLOQUE:NOMBRE] del documento de interpretación."""
+    texto = cargar_documento_interpretacion_negocio()
+    patron = rf"\[BLOQUE:{re.escape(nombre_bloque)}\](.*?)\[/BLOQUE\]"
+    match = re.search(patron, texto, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        bloque = re.sub(r"\s+", " ", match.group(1)).strip()
+        if bloque:
+            return bloque
+    return fallback
+
+
+def diagnostico_negocio_vales(calidad: float, pct_mora: float, dispersion: float, canjes: float) -> str:
+    """Diagnóstico breve basado en la base de conocimiento y en los indicadores visibles."""
+    if calidad >= 70 and canjes > 0 and dispersion > 0:
+        return "La señal es de expansión sana: hay actividad comercial y la base al corriente sostiene el crecimiento."
+    if calidad >= 55 and pct_mora <= 45:
+        return "La operación conserva una base recuperable, pero requiere separar zonas con crecimiento sano de zonas con presión de mora."
+    if calidad < 55 and (canjes > 0 or dispersion > 0):
+        return "La señal es de crecimiento con riesgo: antes de acelerar nueva colocación, conviene fortalecer cobranza y contención."
+    if calidad < 55:
+        return "La prioridad es recuperación: la lectura debe enfocarse en distribuidoras en mora, herramientas activas y seguimiento por sucursal."
+    return "La lectura debe balancear actividad comercial con disciplina de recuperación."
+
 def obtener_top_registro(df: pd.DataFrame, campo: str, nombre_col: str = "Sucursal") -> tuple[str, float]:
     if df.empty or campo not in df.columns or nombre_col not in df.columns:
         return "Sin dato", 0
@@ -3184,6 +3245,10 @@ def mostrar_comentarios_ia(
     else:
         lectura_base_oculta = "La lectura adicional de base no encontró un nivel de sucursal suficiente para generar alertas complementarias."
 
+    lectura_negocio_resumen = obtener_bloque_interpretacion("RESUMEN_CARTERA")
+    lectura_negocio_actividad = obtener_bloque_interpretacion("ACTIVIDAD_COMERCIAL")
+    diagnostico_negocio = diagnostico_negocio_vales(calidad, pct_mora, total_dispersado, total_canjes)
+
     top_disp_nombre, top_disp_valor = obtener_top_registro(df_mapa, "Total Dispersado", nivel_vista)
     top_canjes_nombre, top_canjes_valor = obtener_top_registro(df_mapa, "Canjes Fecha Corte", nivel_vista)
     top_dia_nombre, top_dia_valor = obtener_top_registro(df_mapa, "Total Dispersado Fecha Corte", nivel_vista)
@@ -3194,6 +3259,9 @@ def mostrar_comentarios_ia(
         Al corte <b>{fecha_sel}</b>.
     </p>
     <p>
+        <b>Lectura de negocio:</b> {lectura_negocio_resumen} {diagnostico_negocio}
+    </p>
+    <p>
         La cartera analizada concentra <b>{formato_numero(total_distribuidoras)}</b> distribuidoras:
         <b>{formato_numero(total_corriente)}</b> al corriente (<b>{pct_corriente:,.2f}%</b>) y
         <b>{formato_numero(total_mora)}</b> en mora (<b>{pct_mora:,.2f}%</b>). {lectura_calidad}
@@ -3201,7 +3269,7 @@ def mostrar_comentarios_ia(
     <p>
         En actividad comercial, la dispersión acumulada alcanza <b>{formato_moneda(total_dispersado)}</b>,
         soportada por <b>{formato_numero(total_canjes)}</b> canjes y un ticket promedio acumulado de
-        <b>{formato_moneda(canje_promedio)}</b>. {lectura_corte}
+        <b>{formato_moneda(canje_promedio)}</b>. {lectura_corte} {lectura_negocio_actividad}
     </p>
     <p>
         <b>{tono_var}:</b> {lectura_var} El movimiento neto al corriente es de
@@ -3394,6 +3462,8 @@ def construir_comentario_ia_mapa(
     if ultimo_click:
         lectura_click = f" Última interacción detectada: <b>{ultimo_click}</b>; las métricas y la tabla ya se recalcularon con ese contexto."
 
+    lectura_negocio_mapa = obtener_bloque_interpretacion("MAPA_ESTRUCTURA")
+
     return f"""
 <div class="ai-panel">
     <p>
@@ -3402,6 +3472,7 @@ def construir_comentario_ia_mapa(
         <b>{formato_numero(mora)}</b> en mora y una calidad de cartera de <b>{calidad:,.2f}%</b>.
     </p>
     <p>{lectura_color} {semaforo}</p>
+    <p><b>Lectura de negocio:</b> {lectura_negocio_mapa}</p>
     <p>
         En el corte del día se observan <b>{formato_numero(canjes_dia)}</b> canjes por <b>{formato_moneda(dispersado_dia)}</b>.
         {lectura_var}{filtro}{lectura_click}
@@ -3479,6 +3550,8 @@ def construir_comentario_ia_mapa_plazo_composicion(
     else:
         lectura_plazo = f"La lectura está concentrada en <b>{plazo_texto}</b>, por lo que el comparativo se limita a ese vencimiento."
 
+    lectura_negocio_plazo = obtener_bloque_interpretacion("PLAZO_COMPOSICION")
+
     return f"""
 <div class="ai-panel">
     <p>
@@ -3490,6 +3563,7 @@ def construir_comentario_ia_mapa_plazo_composicion(
         <b>{formato_numero(vales)}</b> vales y un monto promedio por vale de <b>{formato_moneda(monto_vale)}</b>.
         La tasa de ganancia es <b>{tasa:,.1f}%</b>. {lectura_tasa}
     </p>
+    <p><b>Lectura de negocio:</b> {lectura_negocio_plazo}</p>
     <p>
         El mayor peso por capital está en <b>{top_nombre}</b>, con <b>{formato_moneda(top_capital)}</b>
         y una tasa aproximada de <b>{top_tasa:,.1f}%</b>. Esta lectura corresponde al treemap financiero seleccionado,
@@ -3552,6 +3626,7 @@ def construir_comentario_ia_tabla_resumen(
         filtro += f" Búsqueda aplicada: <b>{texto_busqueda}</b>."
 
     valor_top_variable = f"{top_variable_val:,.2f}%" if variable_tamano == "Calidad de Cartera" else formato_numero(top_variable_val)
+    lectura_negocio_tabla = obtener_bloque_interpretacion("TABLA_RESUMEN")
 
     return f"""
 <div class="ai-panel">
@@ -3560,6 +3635,7 @@ def construir_comentario_ia_tabla_resumen(
         En conjunto concentra <b>{formato_numero(total)}</b> distribuidoras, con calidad de cartera de <b>{calidad:,.2f}%</b>
         y ticket promedio acumulado de <b>{formato_moneda(ticket)}</b>.
     </p>
+    <p><b>Lectura de negocio:</b> {lectura_negocio_tabla}</p>
     <p>
         {lectura} El registro líder en <b>{variable_tamano}</b> es <b>{top_variable}</b> con <b>{valor_top_variable}</b>.
         La mayor calidad aparece en <b>{top_calidad}</b> (<b>{top_calidad_val:,.2f}%</b>), mientras que el mayor foco de mora está en
