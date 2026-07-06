@@ -1655,7 +1655,9 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     renombres = {}
     for col in df.columns:
         col_norm = limpiar_texto(col)
-        if col_norm in ["SUBDIRECCION", "SUBDIRECCIÓN"]:
+        if col_norm == "MARCA":
+            renombres[col] = "Marca"
+        elif col_norm in ["SUBDIRECCION", "SUBDIRECCIÓN"]:
             renombres[col] = "Subdirección"
         elif col_norm == "ZONA":
             renombres[col] = "Zona"
@@ -1677,6 +1679,14 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             renombres[col] = "Vales"
 
     df = df.rename(columns=renombres)
+
+    if "Marca" not in df.columns:
+        df["Marca"] = "Sin dato"
+
+    # En algunas versiones del archivo no viene la columna Vales/Canjes.
+    # Se conserva la lectura financiera y el monto promedio queda en 0 si no existe ese dato.
+    if "Vales" not in df.columns:
+        df["Vales"] = 0
 
     columnas_requeridas = [
         "Subdirección",
@@ -1700,6 +1710,8 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     columnas_uso = columnas_requeridas.copy()
     if "Corte" in df.columns:
         columnas_uso = ["Corte"] + columnas_uso
+    if "Marca" in df.columns:
+        columnas_uso = ["Marca"] + columnas_uso
 
     df = df[columnas_uso].copy()
 
@@ -1711,7 +1723,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     df["Corte Fecha"] = df["Corte"].map(extraer_fecha_corte)
     df["Corte Texto"] = df["Corte"].map(formatear_corte_plazo)
 
-    for col in ["Subdirección", "Zona", "Sucursal"]:
+    for col in ["Marca", "Subdirección", "Zona", "Sucursal"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip().replace("", "Sin dato")
         df[col] = df[col].map(lambda x: arreglar_mojibake(x) if isinstance(x, str) else x)
 
@@ -1725,6 +1737,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
 
     df["Tasa de Ganancia"] = convertir_porcentaje(df["Tasa de Ganancia"]).fillna(0)
 
+    df["__Marca_norm"] = df["Marca"].map(normalizar_llave)
     for col in ["Subdirección", "Zona"]:
         df[f"__{col}_norm"] = df[col].map(normalizar_llave)
     df["__Sucursal_norm"] = df["Sucursal"].map(normalizar_llave_sucursal)
@@ -1732,8 +1745,9 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     # El plazo se mantiene EXACTAMENTE como viene en el archivo.
     # Por eso se agrupa incluyendo Plazo y no se calcula promedio ni ponderado.
     agrupado = (
-        df.groupby(["__Subdirección_norm", "__Zona_norm", "__Sucursal_norm", "Corte", "Corte Texto", "Plazo"], as_index=False)
+        df.groupby(["__Marca_norm", "__Subdirección_norm", "__Zona_norm", "__Sucursal_norm", "Corte", "Corte Texto", "Plazo"], as_index=False)
         .agg(
+            Marca=("Marca", "first"),
             Subdirección=("Subdirección", "first"),
             Zona=("Zona", "first"),
             Sucursal=("Sucursal", "first"),
@@ -1772,6 +1786,20 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
 
     if df_fin.empty:
         return df_suc
+
+    # Filtra la vista financiera por la marca activa antes de cruzarla con estructura.
+    # Esto evita que Plazo y composición mezcle Vale Amigo con Viva Vale cuando coinciden
+    # Subdirección, Zona o Sucursal.
+    if "Marca" in df_estado.columns and "__Marca_norm" in df_fin.columns:
+        marcas_validas = {
+            limpiar_texto(x)
+            for x in df_estado["Marca"].dropna().astype(str).unique().tolist()
+            if limpiar_texto(x)
+        }
+        if marcas_validas:
+            df_fin = df_fin[df_fin["__Marca_norm"].isin(marcas_validas)].copy()
+            if df_fin.empty:
+                return df_suc
 
     for col in ["Subdirección", "Zona"]:
         df_suc[f"__{col}_norm"] = df_suc[col].map(normalizar_llave)
