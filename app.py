@@ -1044,6 +1044,37 @@ def cargar_estructura(path: str) -> pd.DataFrame:
 # ======================================================
 # LECTURA DE DISTRIBUIDORAS VALE MX
 # ======================================================
+def resolver_archivo_distribuidoras_mx() -> Path | None:
+    """
+    Busca la base de distribuidoras en la misma carpeta del app.
+    Acepta versiones como Distribuidoras Vale MX.csv, Distribuidoras Vale MX(2).csv, etc.
+    Si hay varias, usa la más reciente.
+    """
+    candidatos = []
+    vistos = set()
+
+    for ruta in [ARCHIVO_DISTRIBUIDORAS_MX]:
+        if ruta.exists() and ruta not in vistos:
+            candidatos.append(ruta)
+            vistos.add(ruta)
+
+    patrones = [
+        "*Distribuidoras*Vale*MX*.csv",
+        "*distribuidoras*vale*mx*.csv",
+    ]
+
+    for patron in patrones:
+        for ruta in BASE_DIR.glob(patron):
+            if ruta.exists() and ruta not in vistos:
+                candidatos.append(ruta)
+                vistos.add(ruta)
+
+    if not candidatos:
+        return None
+
+    return sorted(candidatos, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+
+
 @st.cache_data(show_spinner=False)
 def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
     df = leer_csv_seguro(Path(path))
@@ -1072,9 +1103,18 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
     ]
 
     columnas_opcionales = [
+        "Marca",
         "Distribuidoras en Mora H",
         "Var Dist Corriente",
         "Var Dist en Mora",
+        "Colocado PP H",
+        "Cartera H",
+        "Colocado Neto H",
+        "Colocado Neto al Corriente H",
+        "Mora H",
+        "Clientes Totales H",
+        "Clientes al Corriente H",
+        "Clientes con H",
     ]
 
     if col_fecha is None:
@@ -1099,11 +1139,22 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
         "Distribuidoras en Mora H": "Distribuidoras en Mora",
         "Var Dist Corriente": "Var Dist Corriente",
         "Var Dist en Mora": "Var Dist en Mora",
+        "Colocado PP H": "Colocado PP",
+        "Cartera H": "Cartera Financiera",
+        "Colocado Neto H": "Colocado Neto",
+        "Colocado Neto al Corriente H": "Colocado Neto al Corriente",
+        "Mora H": "Mora",
+        "Clientes Totales H": "Clientes Totales",
+        "Clientes al Corriente H": "Clientes al Corriente",
+        "Clientes con H": "Clientes con Atraso",
         col_fecha: "Fecha de Corte",
     }
     df = df.rename(columns=renombres)
 
-    for col in ["Subdirección", "Zona", "Sucursal", "Coordinacion"]:
+    if "Marca" not in df.columns:
+        df["Marca"] = "Vale Amigo"
+
+    for col in ["Marca", "Subdirección", "Zona", "Sucursal", "Coordinacion"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip()
         df[col] = df[col].replace("", "Sin dato")
         df[col] = df[col].map(lambda x: arreglar_mojibake(x) if isinstance(x, str) else x)
@@ -1115,6 +1166,14 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
         "Distribuidoras en Mora",
         "Var Dist Corriente",
         "Var Dist en Mora",
+        "Colocado PP",
+        "Cartera Financiera",
+        "Colocado Neto",
+        "Colocado Neto al Corriente",
+        "Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
+        "Clientes con Atraso",
     ]:
         if col not in df.columns:
             df[col] = 0
@@ -1143,8 +1202,7 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
     df["Fecha de Corte Texto"] = df["Fecha de Corte"].dt.strftime("%d/%m/%Y")
 
     df["País"] = "MÉXICO"
-    df["Cartera"] = "Vale Amigo"
-    df["Marca"] = "Vale Amigo"
+    df["Cartera"] = df["Marca"]
     df["Dir"] = "Sin dato"
     df["Red"] = "Sin dato"
     df["Conteo"] = 1
@@ -1152,7 +1210,6 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
     df = aplicar_coordenadas_y_estado(df)
 
     return df
-
 
 
 
@@ -6221,13 +6278,30 @@ def mostrar_mapa(valera_param: str):
             set_query_params(valera=valera_param)
             st.rerun()
 
-    if usar_distribuidoras_mx and ARCHIVO_DISTRIBUIDORAS_MX.exists():
+    df_filtrado = pd.DataFrame()
+    carteras_validas = [limpiar_texto(x) for x in item_valera["carteras"]]
+    marcas_validas = set(carteras_validas + [limpiar_texto(nombre_valera)])
+
+    ruta_distribuidoras = resolver_archivo_distribuidoras_mx()
+
+    # Si la base de distribuidoras trae Marca, úsala también para Viva Vale/Rapivale.
+    # Así el mapa toma la fecha de corte y los indicadores reales, no sólo la estructura.
+    if ruta_distribuidoras is not None and limpiar_texto(pais_exclusivo or "MÉXICO") == limpiar_texto("MÉXICO"):
         try:
-            df_filtrado = cargar_distribuidoras_mx(str(ARCHIVO_DISTRIBUIDORAS_MX))
+            df_dist = cargar_distribuidoras_mx(str(ruta_distribuidoras))
+            if "Marca" in df_dist.columns:
+                df_filtrado = df_dist[
+                    df_dist["Marca"].apply(limpiar_texto).isin(marcas_validas)
+                ].copy()
+            elif usar_distribuidoras_mx:
+                df_filtrado = df_dist.copy()
         except Exception as e:
-            st.error(f"No pude leer Distribuidoras Vale MX.csv: {e}")
-            return
-    else:
+            if usar_distribuidoras_mx:
+                st.error(f"No pude leer Distribuidoras Vale MX.csv: {e}")
+                return
+            df_filtrado = pd.DataFrame()
+
+    if df_filtrado.empty:
         if not ARCHIVO_ESTRUCTURA.exists():
             st.error(
                 "No encontré el archivo 'Estructura vales.xlsx'. "
@@ -6240,8 +6314,6 @@ def mostrar_mapa(valera_param: str):
         except Exception as e:
             st.error(f"No pude leer el archivo de estructura: {e}")
             return
-
-        carteras_validas = [limpiar_texto(x) for x in item_valera["carteras"]]
 
         df_filtrado = df[
             df["Cartera"].apply(limpiar_texto).isin(carteras_validas)
