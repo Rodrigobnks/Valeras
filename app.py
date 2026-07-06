@@ -112,8 +112,8 @@ VALES = [
         ),
         "param": "viva_vale",
         "carteras": ["Viva Vale"],
-        "pais_exclusivo": "MÉXICO",
-        "usar_distribuidoras_mx": True,
+        "pais_exclusivo": None,
+        "usar_distribuidoras_mx": False,
         "stagger": "stagger-2",
     },
     {
@@ -127,8 +127,8 @@ VALES = [
         ),
         "param": "rapivale",
         "carteras": ["RapiVale", "Rapivale"],
-        "pais_exclusivo": "MÉXICO",
-        "usar_distribuidoras_mx": True,
+        "pais_exclusivo": None,
+        "usar_distribuidoras_mx": False,
         "stagger": "stagger-3",
     },
     {
@@ -1061,18 +1061,6 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
             col_fecha = col
             break
 
-    col_marca = None
-    posibles_marca = [
-        "Marca",
-        "MARCA",
-        "marca",
-    ]
-
-    for col in posibles_marca:
-        if col in df.columns:
-            col_marca = col
-            break
-
     columnas_requeridas = [
         "Sub",
         "Zona",
@@ -1101,9 +1089,6 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
         )
 
     columnas_presentes = columnas_requeridas + [c for c in columnas_opcionales if c in df.columns] + [col_fecha]
-    if col_marca is not None:
-        columnas_presentes = [col_marca] + columnas_presentes
-
     df = df[columnas_presentes].copy()
 
     renombres = {
@@ -1116,15 +1101,9 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
         "Var Dist en Mora": "Var Dist en Mora",
         col_fecha: "Fecha de Corte",
     }
-    if col_marca is not None:
-        renombres[col_marca] = "Marca"
-
     df = df.rename(columns=renombres)
 
-    if "Marca" not in df.columns:
-        df["Marca"] = "Vale Amigo"
-
-    for col in ["Marca", "Subdirección", "Zona", "Sucursal", "Coordinacion"]:
+    for col in ["Subdirección", "Zona", "Sucursal", "Coordinacion"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip()
         df[col] = df[col].replace("", "Sin dato")
         df[col] = df[col].map(lambda x: arreglar_mojibake(x) if isinstance(x, str) else x)
@@ -1164,7 +1143,8 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
     df["Fecha de Corte Texto"] = df["Fecha de Corte"].dt.strftime("%d/%m/%Y")
 
     df["País"] = "MÉXICO"
-    df["Cartera"] = df["Marca"]
+    df["Cartera"] = "Vale Amigo"
+    df["Marca"] = "Vale Amigo"
     df["Dir"] = "Sin dato"
     df["Red"] = "Sin dato"
     df["Conteo"] = 1
@@ -6102,25 +6082,9 @@ def mostrar_mapa(valera_param: str):
 
     if usar_distribuidoras_mx and ARCHIVO_DISTRIBUIDORAS_MX.exists():
         try:
-            df_distribuidoras = cargar_distribuidoras_mx(str(ARCHIVO_DISTRIBUIDORAS_MX))
+            df_filtrado = cargar_distribuidoras_mx(str(ARCHIVO_DISTRIBUIDORAS_MX))
         except Exception as e:
             st.error(f"No pude leer Distribuidoras Vale MX.csv: {e}")
-            return
-
-        marcas_validas = [limpiar_texto(nombre_valera)] + [limpiar_texto(x) for x in item_valera.get("carteras", [])]
-        df_filtrado = df_distribuidoras[
-            df_distribuidoras["Marca"].apply(limpiar_texto).isin(marcas_validas)
-            | df_distribuidoras["Cartera"].apply(limpiar_texto).isin(marcas_validas)
-        ].copy()
-
-        if df_filtrado.empty:
-            marcas_disponibles = ", ".join(
-                sorted([m for m in df_distribuidoras["Marca"].dropna().astype(str).unique() if str(m).strip()])
-            )
-            st.warning(
-                f"No encontré registros para {nombre_valera} en la columna Marca de Distribuidoras Vale MX.csv. "
-                f"Marcas disponibles: {marcas_disponibles or 'Sin marcas detectadas'}."
-            )
             return
     else:
         if not ARCHIVO_ESTRUCTURA.exists():
