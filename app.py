@@ -1450,12 +1450,79 @@ def recalcular_canje_promedio(df: pd.DataFrame) -> pd.DataFrame:
 # ======================================================
 # LECTURA E INTEGRACIÓN DE PLAZO Y COMPOSICIÓN DE DISPERSIÓN
 # ======================================================
-def resolver_archivo_plazo_composicion() -> Path | None:
+def _leer_columnas_csv_rapido(path: Path) -> list[str]:
+    try:
+        return pd.read_csv(path, nrows=0, encoding="utf-8-sig").columns.tolist()
+    except Exception:
+        try:
+            return pd.read_csv(path, nrows=0, encoding="latin1").columns.tolist()
+        except Exception:
+            return []
+
+
+def _archivo_plazo_tiene_marca(path: Path, marca_objetivo: str | None = None) -> bool:
+    columnas = _leer_columnas_csv_rapido(path)
+    col_marca = next((c for c in columnas if limpiar_texto(c) == "MARCA"), None)
+    if col_marca is None:
+        return False
+
+    if not marca_objetivo:
+        return True
+
+    try:
+        muestra = pd.read_csv(path, usecols=[col_marca], encoding="utf-8-sig")
+    except Exception:
+        try:
+            muestra = pd.read_csv(path, usecols=[col_marca], encoding="latin1")
+        except Exception:
+            return True
+
+    marca_norm = limpiar_texto(marca_objetivo)
+    valores = {limpiar_texto(x) for x in muestra[col_marca].dropna().astype(str).unique().tolist()}
+    return marca_norm in valores
+
+
+def _puntuar_archivo_plazo(path: Path, marca_objetivo: str | None = None) -> tuple:
+    """
+    Prioriza el archivo que realmente permite segmentar por marca.
+    En Streamlit/GitHub puede haber varias copias del CSV; si se toma una versión sin columna Marca,
+    Viva Vale termina mezclándose con Vale Amigo cuando coinciden Subdirección/Zona/Sucursal.
+    """
+    columnas = _leer_columnas_csv_rapido(path)
+    cols_norm = {limpiar_texto(c) for c in columnas}
+
+    score = 0
+    tiene_marca = "MARCA" in cols_norm
+    if tiene_marca:
+        score += 100000
+        if marca_objetivo and _archivo_plazo_tiene_marca(path, marca_objetivo):
+            score += 50000
+
+    requeridas = ["SUBDIRECCION", "SUBDIRECCIÓN", "ZONA", "SUCURSAL", "CORTE", "PLAZO", "CAPITAL", "INTERES", "INTERÉS", "TOTAL"]
+    score += sum(1000 for c in requeridas if c in cols_norm)
+
+    # Si el archivo trae conteo real de vales/canjes, se prefiere para no mostrar ceros.
+    aliases_vales = {
+        "VALES", "CANJES", "CANTIDAD VALES", "CANTIDAD DE VALES",
+        "NUMERO DE VALES", "NÚMERO DE VALES", "RECUENTO DE MONTO", "CUENTA DE MONTO",
+        "COUNT OF MONTO", "CONTEO DE MONTO", "RECUENTO", "CUENTA", "CANTIDAD",
+    }
+    if cols_norm & aliases_vales:
+        score += 5000
+
+    try:
+        mtime = path.stat().st_mtime
+    except Exception:
+        mtime = 0
+
+    return (score, mtime, path.name)
+
+
+def resolver_archivo_plazo_composicion(marca_objetivo: str | None = None) -> Path | None:
     """
     Busca el archivo que alimenta la lectura financiera del detalle por estado.
-    Si existen varias versiones, usa la más reciente por fecha de modificación.
-    La fecha/corte que se muestra en esta vista sale de la columna Corte de este archivo,
-    no de la fecha de corte de las demás visualizaciones.
+    Si existen varias versiones, prioriza la que tenga columna Marca y, si se conoce la marca activa,
+    la que contenga esa marca. Esto evita mezclar Viva Vale con Vale Amigo.
     """
     candidatos = [
         ARCHIVO_PLAZO_COMPOSICION,
@@ -1464,16 +1531,22 @@ def resolver_archivo_plazo_composicion() -> Path | None:
         BASE_DIR / "Plazo y composicion de dispersión(2).csv",
         BASE_DIR / "Plazo y composicion de dispersión(3).csv",
         BASE_DIR / "Plazo y composicion de dispersión(4).csv",
+        BASE_DIR / "Plazo y composicion de dispersión(5).csv",
+        BASE_DIR / "Plazo y composicion de dispersión(6).csv",
         BASE_DIR / "Plazo y composición de dispersión.csv",
         BASE_DIR / "Plazo y composición de dispersión(1).csv",
         BASE_DIR / "Plazo y composición de dispersión(2).csv",
         BASE_DIR / "Plazo y composición de dispersión(3).csv",
         BASE_DIR / "Plazo y composición de dispersión(4).csv",
+        BASE_DIR / "Plazo y composición de dispersión(5).csv",
+        BASE_DIR / "Plazo y composición de dispersión(6).csv",
         BASE_DIR / "Plazo y composicion de dispersion.csv",
         BASE_DIR / "Plazo y composicion de dispersion(1).csv",
         BASE_DIR / "Plazo y composicion de dispersion(2).csv",
         BASE_DIR / "Plazo y composicion de dispersion(3).csv",
         BASE_DIR / "Plazo y composicion de dispersion(4).csv",
+        BASE_DIR / "Plazo y composicion de dispersion(5).csv",
+        BASE_DIR / "Plazo y composicion de dispersion(6).csv",
     ]
 
     patrones = [
@@ -1500,7 +1573,7 @@ def resolver_archivo_plazo_composicion() -> Path | None:
     if not encontrados:
         return None
 
-    encontrados = sorted(encontrados, key=lambda p: p.stat().st_mtime, reverse=True)
+    encontrados = sorted(encontrados, key=lambda p: _puntuar_archivo_plazo(p, marca_objetivo), reverse=True)
     return encontrados[0]
 
 def convertir_porcentaje(serie: pd.Series) -> pd.Series:
@@ -1669,13 +1742,22 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             renombres[col] = "Plazo"
         elif col_norm == "CAPITAL":
             renombres[col] = "Capital"
+        elif col_norm in ["SUMA DE MONTO", "MONTO", "MONTO VALE"] and "CAPITAL" not in {limpiar_texto(c) for c in df.columns}:
+            # Algunas exportaciones vienen de tabla dinámica con "Suma de Monto".
+            # Sólo se usa como Capital si la columna Capital no existe en el archivo.
+            renombres[col] = "Capital"
         elif col_norm in ["INTERES", "INTERÉS"]:
             renombres[col] = "Interes"
         elif col_norm == "TOTAL":
             renombres[col] = "Total"
         elif col_norm in ["TASA DE GANANCIA", "TASA GANANCIA", "TASA"]:
             renombres[col] = "Tasa de Ganancia"
-        elif col_norm in ["VALES", "CANJES"]:
+        elif col_norm in [
+            "VALES", "CANJES", "CANTIDAD VALES", "CANTIDAD DE VALES",
+            "NUMERO DE VALES", "NÚMERO DE VALES", "RECUENTO DE MONTO",
+            "CUENTA DE MONTO", "COUNT OF MONTO", "CONTEO DE MONTO",
+            "RECUENTO", "CUENTA", "CANTIDAD",
+        ]:
             renombres[col] = "Vales"
 
     df = df.rename(columns=renombres)
@@ -1684,9 +1766,11 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
         df["Marca"] = "Sin dato"
 
     # En algunas versiones del archivo no viene la columna Vales/Canjes.
-    # Se conserva la lectura financiera y el monto promedio queda en 0 si no existe ese dato.
+    # En ese caso NO se inventa el conteo: se marca como no disponible para no mostrar ceros falsos.
+    vales_disponible = "Vales" in df.columns
     if "Vales" not in df.columns:
         df["Vales"] = 0
+    df["Vales Disponible"] = bool(vales_disponible)
 
     columnas_requeridas = [
         "Subdirección",
@@ -1713,7 +1797,11 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
     if "Marca" in df.columns:
         columnas_uso = ["Marca"] + columnas_uso
 
+    columnas_uso = columnas_uso + (["Vales Disponible"] if "Vales Disponible" in df.columns else [])
     df = df[columnas_uso].copy()
+
+    if "Vales Disponible" not in df.columns:
+        df["Vales Disponible"] = False
 
     # Se conservan todos los cortes para que la tarjeta Corte pueda cambiar
     # la lectura del treemap sin depender del encabezado general ni del último corte.
@@ -1755,6 +1843,7 @@ def cargar_plazo_composicion(path: str) -> pd.DataFrame:
             Interes=("Interes", "sum"),
             Total=("Total", "sum"),
             Vales=("Vales", "sum"),
+            Vales_Disponible=("Vales Disponible", "max"),
         )
     )
 
@@ -1771,10 +1860,21 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
 
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         df_suc[col] = 0
+    df_suc["Vales_Disponible"] = False
     df_suc["Corte"] = ""
     df_suc["Corte Texto"] = ""
 
-    ruta_plazo = resolver_archivo_plazo_composicion()
+    marcas_validas = set()
+    marca_objetivo = None
+    if "Marca" in df_estado.columns:
+        marcas_validas = {
+            limpiar_texto(x)
+            for x in df_estado["Marca"].dropna().astype(str).unique().tolist()
+            if limpiar_texto(x)
+        }
+        marca_objetivo = next(iter(marcas_validas), None)
+
+    ruta_plazo = resolver_archivo_plazo_composicion(marca_objetivo=marca_objetivo)
     if ruta_plazo is None:
         return df_suc
 
@@ -1790,16 +1890,10 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
     # Filtra la vista financiera por la marca activa antes de cruzarla con estructura.
     # Esto evita que Plazo y composición mezcle Vale Amigo con Viva Vale cuando coinciden
     # Subdirección, Zona o Sucursal.
-    if "Marca" in df_estado.columns and "__Marca_norm" in df_fin.columns:
-        marcas_validas = {
-            limpiar_texto(x)
-            for x in df_estado["Marca"].dropna().astype(str).unique().tolist()
-            if limpiar_texto(x)
-        }
-        if marcas_validas:
-            df_fin = df_fin[df_fin["__Marca_norm"].isin(marcas_validas)].copy()
-            if df_fin.empty:
-                return df_suc
+    if marcas_validas and "__Marca_norm" in df_fin.columns:
+        df_fin = df_fin[df_fin["__Marca_norm"].isin(marcas_validas)].copy()
+        if df_fin.empty:
+            return df_suc
 
     for col in ["Subdirección", "Zona"]:
         df_suc[f"__{col}_norm"] = df_suc[col].map(normalizar_llave)
@@ -1815,13 +1909,14 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
         "Tasa de Ganancia",
         "Plazo",
         "Vales",
+        "Vales_Disponible",
         "Ganancia",
         "Corte",
         "Corte Texto",
     ]
 
     df_suc_base = df_suc.drop(
-        columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia", "Corte", "Corte Texto"],
+        columns=["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Vales_Disponible", "Ganancia", "Corte", "Corte Texto"],
         errors="ignore",
     )
 
@@ -1841,6 +1936,7 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
                 Interes=("Interes", "sum"),
                 Total=("Total", "sum"),
                 Vales=("Vales", "sum"),
+                Vales_Disponible=("Vales_Disponible", "max"),
                 Ganancia=("Ganancia", "sum"),
             )
         )
@@ -1858,6 +1954,10 @@ def preparar_sucursales_financieras_para_mapa(df_estado: pd.DataFrame) -> pd.Dat
 
     for col in ["Capital", "Interes", "Total", "Tasa de Ganancia", "Plazo", "Vales", "Ganancia"]:
         df_suc_match[col] = pd.to_numeric(df_suc_match[col], errors="coerce").fillna(0)
+
+    if "Vales_Disponible" not in df_suc_match.columns:
+        df_suc_match["Vales_Disponible"] = False
+    df_suc_match["Vales_Disponible"] = df_suc_match["Vales_Disponible"].fillna(False).astype(bool)
 
     if "Corte" not in df_suc_match.columns:
         df_suc_match["Corte"] = ""
@@ -5003,19 +5103,24 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
             df_tmp[col] = 0
         df_tmp[col] = pd.to_numeric(df_tmp[col], errors="coerce").fillna(0)
 
+    if "Vales_Disponible" not in df_tmp.columns:
+        df_tmp["Vales_Disponible"] = False
+    df_tmp["Vales_Disponible"] = df_tmp["Vales_Disponible"].fillna(False).astype(bool)
+
     capital = float(df_tmp["Capital"].sum())
     interes = float(df_tmp["Interes"].sum())
     total = float(df_tmp["Total"].sum())
     ganancia = float(df_tmp["Ganancia"].sum())
-    vales = float(df_tmp["Vales"].sum())
+    vales_disponible = bool(df_tmp["Vales_Disponible"].any())
+    vales = float(df_tmp["Vales"].sum()) if vales_disponible else None
 
     if ganancia == 0 and total > 0 and capital > 0:
         ganancia = total - capital
 
     tasa = (interes / capital * 100) if capital else 0
 
-    # Monto Vale = Capital / Vales.
-    monto_vale = (capital / vales) if vales else 0
+    # Monto Vale = Capital / Vales. Si la base no trae conteo real de vales, no se muestra 0 falso.
+    monto_vale = (capital / vales) if (vales_disponible and vales) else None
 
     # El plazo NO se promedia. Se muestra exactamente el plazo que trae el archivo.
     # Si la vista está en "Todos los plazos" y hay más de uno, se muestra "Varios".
@@ -5039,6 +5144,7 @@ def calcular_metricas_plazo(df_suc: pd.DataFrame) -> dict:
         "Tasa de Ganancia": tasa,
         "Plazo": plazo_texto,
         "Vales": vales,
+        "Vales Disponible": vales_disponible,
         "Monto Vale": monto_vale,
         "Corte": corte,
     }
@@ -5197,8 +5303,11 @@ def renderizar_selector_plazo_y_kpis(
         cortes_opciones = cortes_df["Corte Texto"].astype(str).tolist()
 
     estado_norm = limpiar_texto(estado)
-    key_corte = f"selector_corte_plazo_composicion_{estado_norm}"
-    key_plazo = f"selector_plazo_composicion_{estado_norm}"
+    marca_norm_key = ""
+    if "Marca" in df_base.columns:
+        marca_norm_key = "_".join(sorted({limpiar_texto(x) for x in df_base["Marca"].dropna().astype(str).unique().tolist() if limpiar_texto(x)}))
+    key_corte = f"selector_corte_plazo_composicion_{marca_norm_key}_{estado_norm}"
+    key_plazo = f"selector_plazo_composicion_{marca_norm_key}_{estado_norm}"
 
     if key_corte not in st.session_state or st.session_state[key_corte] not in cortes_opciones:
         st.session_state[key_corte] = cortes_opciones[0]
@@ -5567,8 +5676,11 @@ div[data-testid="stPopover"] button span {{
             )
 
         with cols[2]:
-            renderizar_tarjeta_kpi_plazo("Monto Vale", formato_moneda(metricas["Monto Vale"]).replace("$", ""))
-            st.markdown("<div class='plazo-kpi-note'>Capital / Vales</div>", unsafe_allow_html=True)
+            monto_vale_valor = metricas.get("Monto Vale")
+            monto_vale_txt = "Sin dato" if monto_vale_valor is None else formato_moneda(monto_vale_valor).replace("$", "")
+            renderizar_tarjeta_kpi_plazo("Monto Vale", monto_vale_txt)
+            nota_monto = "Capital / Vales" if metricas.get("Vales Disponible") else "La base no trae conteo de vales"
+            st.markdown(f"<div class='plazo-kpi-note'>{nota_monto}</div>", unsafe_allow_html=True)
         with cols[3]:
             renderizar_tarjeta_kpi_plazo("Capital", formato_moneda(metricas["Capital"]))
         with cols[4]:
@@ -5576,7 +5688,8 @@ div[data-testid="stPopover"] button span {{
         with cols[5]:
             renderizar_tarjeta_kpi_plazo("Tasa ganancia", f"{metricas['Tasa de Ganancia']:,.1f}%")
         with cols[6]:
-            renderizar_tarjeta_kpi_plazo("Vales", formato_numero(metricas["Vales"]))
+            vales_txt = formato_numero(metricas["Vales"]) if metricas.get("Vales Disponible") else "Sin dato"
+            renderizar_tarjeta_kpi_plazo("Vales", vales_txt)
 
 
     return df_filtrado, plazo_texto, metricas
