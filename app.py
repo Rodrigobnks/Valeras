@@ -4262,7 +4262,7 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 .map-help-widget {{
     position: absolute;
     top: 12px;
-    left: 709px;
+    left: 600px;
     right: auto;
     z-index: 9999;
     display: inline-block;
@@ -5048,7 +5048,7 @@ def renderizar_guia_interaccion_mapa_financiero():
 .map-help-widget {{
     position: absolute;
     top: 12px;
-    left: 709px;
+    left: 600px;
     right: auto;
     z-index: 9999;
     display: inline-block;
