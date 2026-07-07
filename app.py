@@ -1313,7 +1313,11 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
 
     df = df[columnas_requeridas + (["Canje Promedio Diario"] if "Canje Promedio Diario" in df.columns else [])].copy()
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=False)
+    df["Date"] = pd.to_datetime(
+        df["Date"].astype(str).str.strip(),
+        format="%d/%m/%Y",
+        errors="coerce",
+    )
 
     for col in ["Marca", "Subdirección", "Zona", "Sucursal"]:
         df[col] = df[col].fillna("Sin dato").astype(str).str.strip()
