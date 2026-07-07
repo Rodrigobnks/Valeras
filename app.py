@@ -4260,9 +4260,9 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 }}
 
 .map-help-widget {{
-    position: fixed;
-    top: 86px;
-    left: 18px;
+    position: absolute;
+    top: 12px;
+    right: 12px;
     z-index: 9999;
     display: inline-block;
 }}
@@ -5045,9 +5045,9 @@ def renderizar_guia_interaccion_mapa_financiero():
 }}
 
 .map-help-widget {{
-    position: fixed;
-    top: 86px;
-    left: 18px;
+    position: absolute;
+    top: 12px;
+    right: 12px;
     z-index: 9999;
     display: inline-block;
 }}
