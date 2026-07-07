@@ -33,6 +33,7 @@ FONDO = ASSETS_DIR / "fondo_caprepa.png"
 ARCHIVO_ESTRUCTURA = BASE_DIR / "Estructura vales.xlsx"
 ARCHIVO_DISTRIBUIDORAS_MX = BASE_DIR / "Distribuidoras Vale MX.csv"
 ARCHIVO_DISPERSION = BASE_DIR / "Dispersion diaria.csv"
+ARCHIVO_CATEGORIA_DISPERSION = BASE_DIR / "Categoría dispersión.csv"
 ARCHIVO_PLAZO_COMPOSICION = BASE_DIR / "Plazo y composicion de dispersión.csv"
 ARCHIVO_GEOJSON_MX = BASE_DIR / "mexico_estados.geojson"
 ARCHIVO_GEOJSON_PE = BASE_DIR / "peru_departamentos.geojson"
@@ -1275,7 +1276,7 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
     renombres = {}
     for col in df.columns:
         col_norm = limpiar_texto(col)
-        if col_norm == "DATE":
+        if col_norm in ["DATE", "CORTE", "FECHA", "FECHA CORTE", "FECHA DE CORTE"]:
             renombres[col] = "Date"
         elif col_norm == "MARCA":
             renombres[col] = "Marca"
@@ -1291,6 +1292,14 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
             renombres[col] = "Canjes"
         elif col_norm in ["CANJE PROM", "CANJE PROMEDIO", "CANJE_PROM"]:
             renombres[col] = "Canje Promedio Diario"
+        elif col_norm in ["MONTO FINANCIERO", "MONTO_FINANCIERO"]:
+            renombres[col] = "Monto Financiero"
+        elif col_norm in ["MONTO PP", "MONTO_PP"]:
+            renombres[col] = "Monto PP"
+        elif col_norm in ["PRESTAMOS PERSONALES", "PRÉSTAMOS PERSONALES", "PRESTAMOS_PERSONALES"]:
+            renombres[col] = "Prestamos Personales"
+        elif col_norm in ["PP PROMEDIO", "PP_PROMEDIO"]:
+            renombres[col] = "PP Promedio"
 
     df = df.rename(columns=renombres)
 
@@ -1311,7 +1320,14 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
             + ", ".join(faltantes)
         )
 
-    df = df[columnas_requeridas + (["Canje Promedio Diario"] if "Canje Promedio Diario" in df.columns else [])].copy()
+    columnas_opcionales = [
+        "Canje Promedio Diario",
+        "Monto Financiero",
+        "Monto PP",
+        "Prestamos Personales",
+        "PP Promedio",
+    ]
+    df = df[columnas_requeridas + [c for c in columnas_opcionales if c in df.columns]].copy()
 
     df["Date"] = pd.to_datetime(
         df["Date"].astype(str).str.strip(),
@@ -1324,7 +1340,15 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
         df[col] = df[col].replace("", "Sin dato")
         df[col] = df[col].map(lambda x: arreglar_mojibake(x) if isinstance(x, str) else x)
 
-    for col in ["Total Dispersado", "Canjes", "Canje Promedio Diario"]:
+    for col in [
+        "Total Dispersado",
+        "Canjes",
+        "Canje Promedio Diario",
+        "Monto Financiero",
+        "Monto PP",
+        "Prestamos Personales",
+        "PP Promedio",
+    ]:
         if col in df.columns:
             df[col] = convertir_numero(df[col]).fillna(0)
 
@@ -1506,6 +1530,225 @@ def recalcular_canje_promedio(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+
+# ======================================================
+# LECTURA Y GRÁFICA DE CATEGORÍAS DE DISPERSIÓN
+# ======================================================
+def resolver_archivo_categoria_dispersion() -> Path | None:
+    """
+    Busca la base de categorías en la misma carpeta del app.
+    Acepta nombres con o sin acento y versiones como (1), (2), etc.
+    Si existen varias copias, utiliza la más reciente.
+    """
+    candidatos = []
+    vistos = set()
+
+    rutas_directas = [
+        ARCHIVO_CATEGORIA_DISPERSION,
+        BASE_DIR / "Categoria dispersión.csv",
+        BASE_DIR / "Categoría dispersion.csv",
+        BASE_DIR / "Categoria dispersion.csv",
+    ]
+
+    for ruta in rutas_directas:
+        if ruta.exists() and ruta not in vistos:
+            candidatos.append(ruta)
+            vistos.add(ruta)
+
+    patrones = [
+        "*Categoría*dispersión*.csv",
+        "*Categoria*dispersion*.csv",
+        "*Categoría*dispersion*.csv",
+        "*Categoria*dispersión*.csv",
+        "*categoria*dispersion*.csv",
+    ]
+
+    for patron in patrones:
+        for ruta in BASE_DIR.glob(patron):
+            if ruta.exists() and ruta not in vistos:
+                candidatos.append(ruta)
+                vistos.add(ruta)
+
+    if not candidatos:
+        return None
+
+    return sorted(candidatos, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+
+
+@st.cache_data(show_spinner=False)
+def cargar_categoria_dispersion(path: str) -> pd.DataFrame:
+    df = leer_csv_seguro(Path(path))
+
+    renombres = {}
+    for col in df.columns:
+        col_norm = limpiar_texto(col)
+        if col_norm in ["CORTE", "DATE", "FECHA", "FECHA CORTE", "FECHA DE CORTE"]:
+            renombres[col] = "Corte"
+        elif col_norm in ["CATEGORIA", "CATEGORÍA"]:
+            renombres[col] = "Categoria"
+        elif col_norm in ["CAPITAL", "MONTO", "IMPORTE"]:
+            renombres[col] = "Capital"
+        elif col_norm == "MARCA":
+            renombres[col] = "Marca"
+        elif col_norm in ["SUBDIRECCION", "SUBDIRECCIÓN"]:
+            renombres[col] = "Subdirección"
+        elif col_norm == "ZONA":
+            renombres[col] = "Zona"
+        elif col_norm == "SUCURSAL":
+            renombres[col] = "Sucursal"
+
+    df = df.rename(columns=renombres)
+
+    requeridas = ["Corte", "Categoria", "Capital"]
+    faltantes = [c for c in requeridas if c not in df.columns]
+    if faltantes:
+        raise ValueError(
+            "El archivo de categorías no tiene estas columnas: " + ", ".join(faltantes)
+        )
+
+    columnas = requeridas + [
+        c for c in ["Marca", "Subdirección", "Zona", "Sucursal"] if c in df.columns
+    ]
+    df = df[columnas].copy()
+
+    df["Corte"] = pd.to_datetime(df["Corte"], errors="coerce", dayfirst=True)
+    df["Categoria"] = (
+        df["Categoria"]
+        .fillna("Sin categoría")
+        .astype(str)
+        .str.strip()
+        .replace("", "Sin categoría")
+    )
+    df["Capital"] = convertir_numero(df["Capital"]).fillna(0)
+
+    for col in ["Marca", "Subdirección", "Zona", "Sucursal"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("Sin dato").astype(str).str.strip()
+
+    return df.dropna(subset=["Corte"]).copy()
+
+
+def obtener_categoria_al_corte(
+    fecha_corte_texto: str,
+    nombre_valera: str,
+    df_resumen_base: pd.DataFrame,
+) -> tuple[pd.DataFrame, str, str]:
+    """
+    Devuelve la composición por categoría del corte seleccionado.
+
+    Si la base incluye Marca/Subdirección/Zona/Sucursal, aplica esos filtros.
+    Con la base actual (Corte, Categoria, Capital), la gráfica representa el
+    total general del corte y no se segmenta por marca ni por mapa.
+    """
+    ruta = resolver_archivo_categoria_dispersion()
+    if ruta is None:
+        return pd.DataFrame(), "", "No encontré el archivo Categoría dispersión.csv."
+
+    try:
+        df_cat = cargar_categoria_dispersion(str(ruta))
+    except Exception as e:
+        return pd.DataFrame(), "", f"No pude leer la base de categorías: {e}"
+
+    fecha_objetivo = pd.to_datetime(fecha_corte_texto, errors="coerce", dayfirst=True)
+    if pd.isna(fecha_objetivo):
+        return pd.DataFrame(), "", "La fecha de corte seleccionada no es válida para categorías."
+
+    fechas_validas = df_cat.loc[df_cat["Corte"] <= fecha_objetivo, "Corte"]
+    if fechas_validas.empty:
+        return pd.DataFrame(), "", "No hay categorías para esa fecha de corte."
+
+    # Usa la fecha exacta; si falta, toma la última disponible anterior al corte.
+    fecha_usada = fecha_objetivo.normalize()
+    if not (df_cat["Corte"].dt.normalize() == fecha_usada).any():
+        fecha_usada = fechas_validas.max().normalize()
+
+    df_cat = df_cat[df_cat["Corte"].dt.normalize() == fecha_usada].copy()
+
+    filtros_aplicados = []
+    if "Marca" in df_cat.columns:
+        marcas_objetivo = {limpiar_texto(nombre_valera)}
+        if "Marca" in df_resumen_base.columns:
+            marcas_objetivo.update(
+                limpiar_texto(x) for x in df_resumen_base["Marca"].dropna().unique()
+            )
+        df_cat = df_cat[df_cat["Marca"].map(limpiar_texto).isin(marcas_objetivo)].copy()
+        filtros_aplicados.append("marca")
+
+    for col in ["Subdirección", "Zona", "Sucursal"]:
+        if col in df_cat.columns and col in df_resumen_base.columns:
+            valores = {limpiar_texto(x) for x in df_resumen_base[col].dropna().unique()}
+            if valores:
+                df_cat = df_cat[df_cat[col].map(limpiar_texto).isin(valores)].copy()
+                filtros_aplicados.append(col.lower())
+
+    if df_cat.empty:
+        return pd.DataFrame(), fecha_usada.strftime("%d/%m/%Y"), "No hay categorías para los filtros seleccionados."
+
+    resumen = (
+        df_cat.groupby("Categoria", as_index=False)["Capital"]
+        .sum()
+        .sort_values("Capital", ascending=False)
+    )
+    resumen = resumen[resumen["Capital"] > 0].copy()
+
+    alcance = (
+        "La gráfica responde a los filtros del tablero."
+        if filtros_aplicados
+        else "La base de categorías sólo trae Corte, Categoria y Capital; por eso la gráfica muestra el total general del corte."
+    )
+    return resumen, fecha_usada.strftime("%d/%m/%Y"), alcance
+
+
+def mostrar_grafica_categorias(
+    fecha_corte_texto: str,
+    nombre_valera: str,
+    df_resumen_base: pd.DataFrame,
+) -> None:
+    resumen, fecha_usada, mensaje = obtener_categoria_al_corte(
+        fecha_corte_texto=fecha_corte_texto,
+        nombre_valera=nombre_valera,
+        df_resumen_base=df_resumen_base,
+    )
+
+    if resumen.empty:
+        st.info(mensaje)
+        return
+
+    total_capital = resumen["Capital"].sum()
+    resumen["Participación"] = resumen["Capital"] / total_capital * 100 if total_capital else 0
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=resumen["Categoria"],
+                values=resumen["Capital"],
+                hole=0.48,
+                sort=False,
+                textinfo="label+percent",
+                textposition="outside",
+                hovertemplate=(
+                    "<b>%{label}</b><br>"
+                    "Capital: $%{value:,.0f}<br>"
+                    "Participación: %{percent}<extra></extra>"
+                ),
+            )
+        ]
+    )
+    fig.update_layout(
+        title={
+            "text": f"Categorías de dispersión al {fecha_usada}",
+            "x": 0.02,
+            "xanchor": "left",
+        },
+        margin=dict(l=35, r=35, t=75, b=35),
+        height=430,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
+    )
+
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.caption(mensaje)
 
 
 # ======================================================
@@ -6480,6 +6723,12 @@ def mostrar_mapa(valera_param: str):
 </div>
 """,
         unsafe_allow_html=True,
+    )
+
+    mostrar_grafica_categorias(
+        fecha_corte_texto=fecha_sel,
+        nombre_valera=nombre_valera,
+        df_resumen_base=df_resumen_base,
     )
 
     # Los botones de Vista y Tamaño se muestran debajo del mapa.
