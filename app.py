@@ -1327,6 +1327,105 @@ def cargar_clientes_tipos_desembolso(path: str) -> pd.DataFrame:
     return df.dropna(subset=["Corte"]).copy()
 
 
+
+def obtener_porcentajes_tipos_desembolso(
+    df_contexto: pd.DataFrame,
+    selected_node_id: str | None,
+    fecha_referencia: str,
+) -> dict[str, float]:
+    """
+    Calcula los porcentajes del nodo seleccionado para mostrarlos
+    dentro del bloque ampliado del treemap.
+
+    No muestra nada antes del clic.
+    """
+    resultado = {
+        "Nuevo": 0.0,
+        "*Renovación": 0.0,
+        "**Renovación Anticipada": 0.0,
+        "Vale sobre vale": 0.0,
+    }
+
+    if not selected_node_id or not ARCHIVO_CLIENTES.exists():
+        return resultado
+
+    try:
+        df_clientes = cargar_clientes_tipos_desembolso(
+            str(ARCHIVO_CLIENTES)
+        )
+    except Exception:
+        return resultado
+
+    if df_clientes.empty:
+        return resultado
+
+    fecha_objetivo = pd.to_datetime(
+        fecha_referencia,
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    if pd.isna(fecha_objetivo):
+        fecha_objetivo = df_clientes["Corte"].max()
+
+    fechas_validas = df_clientes.loc[
+        df_clientes["Corte"] <= fecha_objetivo,
+        "Corte",
+    ]
+
+    if fechas_validas.empty:
+        return resultado
+
+    corte_usado = fechas_validas.max().normalize()
+    df_clientes = df_clientes[
+        df_clientes["Corte"].dt.normalize() == corte_usado
+    ].copy()
+
+    df_nodo = filtrar_df_por_nodo_treemap(
+        df_contexto,
+        selected_node_id,
+    )
+
+    for col in ["Subdirección", "Zona", "Sucursal"]:
+        if col not in df_nodo.columns or col not in df_clientes.columns:
+            continue
+
+        valores = {
+            limpiar_texto(valor)
+            for valor in df_nodo[col].dropna().astype(str).tolist()
+            if limpiar_texto(valor)
+        }
+
+        if valores:
+            df_clientes = df_clientes[
+                df_clientes[col].map(limpiar_texto).isin(valores)
+            ].copy()
+
+    if df_clientes.empty:
+        return resultado
+
+    total_canjes = float(
+        pd.to_numeric(
+            df_clientes["Total Canjes"],
+            errors="coerce",
+        ).fillna(0).sum()
+    )
+
+    if not total_canjes:
+        return resultado
+
+    for tipo in resultado:
+        cantidad = float(
+            pd.to_numeric(
+                df_clientes[tipo],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+        resultado[tipo] = cantidad / total_canjes * 100
+
+    return resultado
+
+
 def mostrar_tarjetas_tipos_desembolso(
     df_contexto: pd.DataFrame,
     selected_node_id: str | None,
@@ -6737,6 +6836,33 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
     """
     df_plot = df_suc.copy()
 
+    fecha_clientes = ""
+    if "Corte Texto" in df_plot.columns:
+        fecha_clientes = next(
+            (
+                str(valor)
+                for valor in df_plot["Corte Texto"].dropna().tolist()
+                if str(valor).strip()
+            ),
+            "",
+        )
+
+    if not fecha_clientes and "Corte" in df_plot.columns:
+        fecha_clientes = next(
+            (
+                formatear_corte_plazo(valor)
+                for valor in df_plot["Corte"].dropna().tolist()
+                if str(valor).strip()
+            ),
+            "",
+        )
+
+    porcentajes_desembolso = obtener_porcentajes_tipos_desembolso(
+        df_contexto=df_plot,
+        selected_node_id=selected_node_id,
+        fecha_referencia=fecha_clientes,
+    )
+
     for col in ["Subdirección", "Zona", "Sucursal"]:
         if col not in df_plot.columns:
             df_plot[col] = "Sin dato"
@@ -6818,6 +6944,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
     values = []
     colors = []
     custom = []
+    textos_nodos = []
 
     def add_node(node_id: str, label: str, parent: str, row: pd.Series):
         capital = float(pd.to_numeric(row.get("Capital", 0), errors="coerce") or 0)
@@ -6835,6 +6962,29 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
         values.append(capital)
         colors.append(tasa)
         custom.append([capital, interes, total_val, ganancia, tasa, plazo_texto, vales, corte, node_id])
+
+        texto_nodo = (
+            f"<b>{label}</b><br>"
+            f"${capital:,.0f}<br>"
+            f"{tasa:,.1f}%<br>"
+            f"{plazo_texto}"
+        )
+
+        # Los porcentajes aparecen únicamente dentro del bloque que ya fue
+        # seleccionado y ampliado. Antes del clic no se muestran.
+        if selected_node_id and node_id == selected_node_id:
+            texto_nodo += (
+                f"<br><br><b>Nuevo:</b> "
+                f"{porcentajes_desembolso['Nuevo']:,.2f}%"
+                f"<br><b>Renovación:</b> "
+                f"{porcentajes_desembolso['*Renovación']:,.2f}%"
+                f"<br><b>Renovación anticipada:</b> "
+                f"{porcentajes_desembolso['**Renovación Anticipada']:,.2f}%"
+                f"<br><b>Vale sobre vale:</b> "
+                f"{porcentajes_desembolso['Vale sobre vale']:,.2f}%"
+            )
+
+        textos_nodos.append(texto_nodo)
 
     add_node(f"estado::{estado_label}", estado_label, "", total.iloc[0])
 
@@ -6869,12 +7019,8 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
                 colorbar=dict(title="Tasa ganancia"),
                 line=dict(width=1.5, color="rgba(255,255,255,0.65)"),
             ),
-            texttemplate=(
-                "<b>%{label}</b><br>"
-                "$%{customdata[0]:,.0f}<br>"
-                "%{customdata[4]:,.1f}%<br>"
-                "%{customdata[5]}"
-            ),
+            text=textos_nodos,
+            texttemplate="%{text}",
             textfont=dict(size=16),
             customdata=custom,
             hoverinfo="none",
@@ -7144,13 +7290,6 @@ def construir_mapa_estado_plazo_composicion(
     renderizar_guia_interaccion_mapa_financiero()
     selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, estado, selection_key)
 
-    nodo_clientes = selected_node_id_actual or selected_node_id
-    mostrar_tarjetas_tipos_desembolso(
-        df_contexto=df_suc_filtrado,
-        selected_node_id=nodo_clientes,
-        fecha_referencia=corte_actual or fecha_texto,
-    )
-
     mostrar_comentario_ia_mapa_plazo_composicion(
         df_plazo=df_suc_filtrado,
         nombre_valera=nombre_valera,
@@ -7229,13 +7368,6 @@ def construir_mapa_subdireccion_plazo_composicion(
 
     renderizar_guia_interaccion_mapa_financiero()
     selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, subdireccion, selection_key)
-
-    nodo_clientes = selected_node_id_actual or selected_node_id
-    mostrar_tarjetas_tipos_desembolso(
-        df_contexto=df_suc_filtrado,
-        selected_node_id=nodo_clientes,
-        fecha_referencia=corte_actual or fecha_texto,
-    )
 
     mostrar_comentario_ia_mapa_plazo_composicion(
         df_plazo=df_suc_filtrado,
