@@ -4007,24 +4007,52 @@ def construir_comentario_ia_mapa(
     canjes_dia = _sumar_columna(df_contexto, "Canjes Fecha Corte")
     dispersado_dia = _sumar_columna(df_contexto, "Total Dispersado Fecha Corte")
 
+    # Lectura dinámica del botón "Tipo de mapa".
     if tipo_mapa == "Calor Canjes":
-        top_nombre, top_valor = _top_por_columna(df_mapa, "Canjes Fecha Corte", nivel_vista)
-        lectura_color = (
-            f"El color está priorizando los <b>canjes del día de corte</b>. "
-            f"El mayor punto en la vista activa es <b>{top_nombre}</b>, con <b>{formato_numero(top_valor)}</b> canjes del corte."
+        top_color_nombre, top_color_valor = _top_por_columna(
+            df_mapa,
+            "Canjes Fecha Corte",
+            nivel_vista,
         )
-    elif tipo_mapa == "Calor Dispersado":
-        top_nombre, top_valor = _top_por_columna(df_mapa, "Total Dispersado Fecha Corte", nivel_vista)
-        lectura_color = (
-            f"El color está priorizando el <b>importe dispersado del día de corte</b>. "
-            f"El mayor punto en la vista activa es <b>{top_nombre}</b>, con <b>{formato_moneda(top_valor)}</b> dispersados en el corte."
+        lectura_tipo_mapa = (
+            f"Está activo <b>Calor Canjes</b>: el color de cada punto representa los "
+            f"<b>canjes realizados en la fecha de corte</b>; los tonos de mayor intensidad "
+            f"permiten ubicar dónde se concentró la actividad comercial del día. "
+            f"El mayor registro de la vista es <b>{top_color_nombre}</b>, con "
+            f"<b>{formato_numero(top_color_valor)}</b> canjes."
         )
     else:
-        top_nombre, top_valor = _top_por_columna(df_mapa, variable_tamano, nivel_vista)
-        lectura_color = (
-            f"El color está mostrando la <b>estructura por Subdirección</b> y el tamaño de las bolitas responde a <b>{variable_tamano}</b>. "
-            f"El elemento con mayor peso en esa variable es <b>{top_nombre}</b>, con <b>{formato_numero(top_valor) if variable_tamano != 'Calidad de Cartera' else f'{top_valor:,.2f}%'}</b>."
+        lectura_tipo_mapa = (
+            "Está activa <b>Subdirección</b>: el color de cada bolita identifica la "
+            "<b>Subdirección</b> a la que pertenece la sucursal, permitiendo comparar "
+            "la distribución territorial de la estructura."
         )
+
+    # Lectura dinámica del botón "Tamaño de bolita".
+    top_tamano_nombre, top_tamano_valor = _top_por_columna(
+        df_mapa,
+        variable_tamano,
+        nivel_vista,
+    )
+
+    if variable_tamano == "Distribuidoras en Mora":
+        lectura_tamano = (
+            "Está activo <b>Distribuidoras en Mora</b>: el tamaño de cada bolita aumenta "
+            "con el número de distribuidoras en mora, por lo que los círculos más grandes "
+            "señalan una mayor concentración de riesgo y prioridad de cobranza. "
+            f"El mayor peso corresponde a <b>{top_tamano_nombre}</b>, con "
+            f"<b>{formato_numero(top_tamano_valor)}</b> distribuidoras en mora."
+        )
+    else:
+        lectura_tamano = (
+            "Está activo <b>Distribuidoras Totales</b>: el tamaño de cada bolita aumenta "
+            "con el tamaño total de la base de distribuidoras de la sucursal, por lo que "
+            "los círculos más grandes representan una mayor escala operativa. "
+            f"El mayor peso corresponde a <b>{top_tamano_nombre}</b>, con "
+            f"<b>{formato_numero(top_tamano_valor)}</b> distribuidoras totales."
+        )
+
+    lectura_color = f"{lectura_tipo_mapa} {lectura_tamano}"
 
     if calidad >= 70:
         semaforo = "La calidad general es favorable; la lectura del mapa debe enfocarse en sostener cobertura y replicar las zonas fuertes."
@@ -6929,6 +6957,52 @@ def mostrar_mapa(valera_param: str):
     nivel_vista = st.session_state["nivel_vista"]
     variable_tamano = st.session_state["variable_tamano"]
 
+    # Detecta el país antes de renderizar los controles del mapa.
+    paises_datos = sorted(df_filtrado["País"].dropna().unique().tolist())
+    pais_actual = paises_datos[0] if len(paises_datos) == 1 else ""
+    es_mexico = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("MÉXICO")
+    es_peru = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("PERÚ")
+
+    mostrar_botones_tipo_mapa = True
+    if (subdireccion_sel or estado_sel) and (es_mexico or es_peru):
+        vista_detalle_actual = st.session_state.get(
+            "vista_detalle_estado_valeras",
+            "Estructura",
+        )
+        mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
+
+    # Controles colocados arriba del mapa, alineados a la izquierda,
+    # en la zona señalada por el usuario.
+    if mostrar_botones_tipo_mapa:
+        controles_izq, controles_centro, controles_espacio = st.columns(
+            [1.55, 1.75, 5.70]
+        )
+
+        with controles_izq:
+            tipo_mapa = selector_botones(
+                "Tipo de mapa",
+                ["Subdirección", "Calor Canjes"],
+                "tipo_mapa_valeras",
+                "Subdirección",
+            )
+
+        with controles_centro:
+            variable_tamano = selector_botones(
+                "Tamaño de bolita",
+                ["Distribuidoras Totales", "Distribuidoras en Mora"],
+                "variable_tamano",
+                "Distribuidoras Totales",
+            )
+    else:
+        tipo_mapa = st.session_state.get(
+            "tipo_mapa_valeras",
+            "Subdirección",
+        )
+        variable_tamano = st.session_state.get(
+            "variable_tamano",
+            "Distribuidoras Totales",
+        )
+
     # Resumen IA ejecutivo + Tipo de mapa / guía ejecutiva.
     df_mapa_previo = preparar_mapa_por_nivel(
         df=df_resumen_base,
@@ -6941,7 +7015,8 @@ def mostrar_mapa(valera_param: str):
     if st.session_state.get("variable_tamano") not in ["Distribuidoras Totales", "Distribuidoras en Mora"]:
         st.session_state["variable_tamano"] = "Distribuidoras Totales"
 
-    tipo_mapa = st.session_state.get("tipo_mapa_valeras", "Subdirección")
+    tipo_mapa = st.session_state.get("tipo_mapa_valeras", tipo_mapa)
+    variable_tamano = st.session_state.get("variable_tamano", variable_tamano)
 
     resumen_ejecutivo_html = mostrar_comentarios_ia(
         df_resumen_base=df_resumen_base,
@@ -6957,12 +7032,6 @@ def mostrar_mapa(valera_param: str):
         devolver_html=True,
     )
     renderizar_robot_resumen_ejecutivo(resumen_ejecutivo_html or "")
-
-    # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
-    paises_datos = sorted(df_filtrado["País"].dropna().unique().tolist())
-    pais_actual = paises_datos[0] if len(paises_datos) == 1 else ""
-    es_mexico = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("MÉXICO")
-    es_peru = len(paises_datos) == 1 and limpiar_texto(pais_actual) == limpiar_texto("PERÚ")
 
     detalle_estado_activo = bool(subdireccion_sel and (es_mexico or es_peru))
     elementos_estructura_actual = int(df_mapa_previo[nivel_vista].nunique()) if nivel_vista in df_mapa_previo.columns else 0
@@ -7105,28 +7174,6 @@ def mostrar_mapa(valera_param: str):
             texto_busqueda=texto_busqueda_actual,
             estado_sel=estado_sel,
         )
-
-    mostrar_botones_tipo_mapa = True
-    if (subdireccion_sel or estado_sel) and (es_mexico or es_peru):
-        vista_detalle_actual = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
-        mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
-
-    if mostrar_botones_tipo_mapa:
-        cols_tipo_mapa_bajo_leyenda = st.columns([1.25, 1, 1])
-        with cols_tipo_mapa_bajo_leyenda[1]:
-            tipo_mapa = selector_botones(
-                "Tipo de mapa",
-                ["Subdirección", "Calor Canjes"],
-                "tipo_mapa_valeras",
-                "Subdirección",
-            )
-        with cols_tipo_mapa_bajo_leyenda[2]:
-            variable_tamano = selector_botones(
-                "Tamaño de bolita",
-                ["Distribuidoras Totales", "Distribuidoras en Mora"],
-                "variable_tamano",
-                "Distribuidoras Totales",
-            )
 
     df_mapa = preparar_mapa_por_nivel(
         df=df_resumen_base,
