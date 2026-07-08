@@ -3520,6 +3520,8 @@ def configurar_columnas_tabla(df: pd.DataFrame) -> dict:
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Total Dispersado",
