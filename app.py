@@ -7009,6 +7009,7 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
             parents=parents,
             values=values,
             branchvalues="total",
+            level=selected_node_id if selected_node_id else "",
             marker=dict(
                 colors=colors,
                 colorscale=[
@@ -7022,6 +7023,8 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
             text=textos_nodos,
             texttemplate="%{text}",
             textfont=dict(size=16),
+            textinfo="text",
+            insidetextfont=dict(size=16),
             customdata=custom,
             hoverinfo="none",
             hovertemplate=None,
@@ -7284,7 +7287,10 @@ def construir_mapa_estado_plazo_composicion(
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
         clickmode="event+select",
-        uirevision=f"{estado}-{corte_actual}-{plazo_texto}",
+        uirevision=(
+            f"{estado}-{corte_actual}-{plazo_texto}-"
+            f"{selected_node_id or 'raiz'}"
+        ),
     )
 
     renderizar_guia_interaccion_mapa_financiero()
@@ -7363,7 +7369,10 @@ def construir_mapa_subdireccion_plazo_composicion(
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
         clickmode="event+select",
-        uirevision=f"{subdireccion}-{corte_actual}-{plazo_texto}",
+        uirevision=(
+            f"{subdireccion}-{corte_actual}-{plazo_texto}-"
+            f"{selected_node_id or 'raiz'}"
+        ),
     )
 
     renderizar_guia_interaccion_mapa_financiero()
