@@ -7079,18 +7079,31 @@ def mostrar_mapa(valera_param: str):
                 )
             )
 
-            tipo_mapa = selector_botones_vertical(
-                "Tipo de mapa",
-                ["Subdirección", "Calor Canjes"],
-                "tipo_mapa_valeras",
-                "Subdirección",
+            tipo_mapa = selector_tarjeta_desplegable(
+                titulo="Tipo de mapa",
+                valor_visible=st.session_state.get(
+                    "tipo_mapa_valeras",
+                    "Subdirección",
+                ),
+                opciones=["Subdirección", "Calor Canjes"],
+                key="tipo_mapa_valeras",
+                default="Subdirección",
+                key_prefix="selector_tipo_mapa",
             )
 
-            variable_tamano = selector_botones_vertical(
-                "Tamaño de bolita",
-                ["Distribuidoras Totales", "Distribuidoras en Mora"],
-                "variable_tamano",
-                "Distribuidoras Totales",
+            variable_tamano = selector_tarjeta_desplegable(
+                titulo="Tamaño de bolita",
+                valor_visible=st.session_state.get(
+                    "variable_tamano",
+                    "Distribuidoras Totales",
+                ),
+                opciones=[
+                    "Distribuidoras Totales",
+                    "Distribuidoras en Mora",
+                ],
+                key="variable_tamano",
+                default="Distribuidoras Totales",
+                key_prefix="selector_tamano_bolita",
             )
     else:
         tipo_mapa = st.session_state.get(
@@ -7168,11 +7181,16 @@ def mostrar_mapa(valera_param: str):
                 unsafe_allow_html=True,
             )
 
-            vista_detalle_estado = selector_botones(
-                "Vista del detalle",
-                ["Estructura", "Plazo y composición"],
-                "vista_detalle_estado_valeras",
-                "Estructura",
+            vista_detalle_estado = selector_tarjeta_desplegable(
+                titulo="Vista del detalle",
+                valor_visible=st.session_state.get(
+                    "vista_detalle_estado_valeras",
+                    "Estructura",
+                ),
+                opciones=["Estructura", "Plazo y composición"],
+                key="vista_detalle_estado_valeras",
+                default="Estructura",
+                key_prefix="selector_vista_detalle",
             )
 
             if vista_detalle_estado == "Plazo y composición":
