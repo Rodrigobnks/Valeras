@@ -523,6 +523,17 @@ def normalizar_sucursal(valor) -> str:
     return texto
 
 
+def es_subdireccion_sin_asignar(valor) -> bool:
+    texto = limpiar_texto(valor)
+    return texto in {
+        "POR ASIGNAR",
+        "SIN ASIGNAR",
+        "PENDIENTE POR ASIGNAR",
+        "NO ASIGNADA",
+        "NO ASIGNADO",
+    }
+
+
 def detectar_pais(row) -> str:
     texto = " ".join(
         [
@@ -6915,15 +6926,55 @@ def mostrar_mapa(valera_param: str):
     if not fechas:
         fechas = ["Sin fecha"]
 
-    fecha_sel = st.selectbox(
-        "Fecha de Corte",
-        fechas,
-        index=len(fechas) - 1,
-        key=f"fecha_corte_{valera_param}",
-    )
+    key_sin_asignar = f"mostrar_sin_asignar_{valera_param}"
+    if key_sin_asignar not in st.session_state:
+        st.session_state[key_sin_asignar] = True
+
+    col_fecha_corte, col_sin_asignar = st.columns([8.8, 1.2], gap="small")
+
+    with col_fecha_corte:
+        fecha_sel = st.selectbox(
+            "Fecha de Corte",
+            fechas,
+            index=len(fechas) - 1,
+            key=f"fecha_corte_{valera_param}",
+        )
+
+    with col_sin_asignar:
+        st.markdown(
+            "<div style='height:28px'></div>",
+            unsafe_allow_html=True,
+        )
+        tipo_boton_sin_asignar = (
+            "primary"
+            if st.session_state[key_sin_asignar]
+            else "secondary"
+        )
+        if st.button(
+            "Sin Asignar",
+            type=tipo_boton_sin_asignar,
+            use_container_width=True,
+            key=f"boton_sin_asignar_{valera_param}",
+            help=(
+                "Activo: incluye la Subdirección Por Asignar. "
+                "Inactivo: la oculta de todos los visuales."
+            ),
+        ):
+            st.session_state[key_sin_asignar] = not st.session_state[key_sin_asignar]
+            st.rerun()
 
     if "Fecha de Corte Texto" in df_filtrado.columns and fecha_sel != "Sin fecha":
-        df_filtrado = df_filtrado[df_filtrado["Fecha de Corte Texto"] == fecha_sel].copy()
+        df_filtrado = df_filtrado[
+            df_filtrado["Fecha de Corte Texto"] == fecha_sel
+        ].copy()
+
+    if (
+        not st.session_state[key_sin_asignar]
+        and "Subdirección" in df_filtrado.columns
+    ):
+        df_filtrado = df_filtrado[
+            ~df_filtrado["Subdirección"].map(es_subdireccion_sin_asignar)
+        ].copy()
 
     df_filtrado = integrar_dispersion_acumulada(df_filtrado, fecha_sel)
     df_filtrado = agregar_columnas_variacion(df_filtrado)
