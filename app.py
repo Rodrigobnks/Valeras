@@ -3026,29 +3026,16 @@ def selector_tarjeta_desplegable(
     if key not in st.session_state or st.session_state[key] not in opciones:
         st.session_state[key] = default if default in opciones else opciones[0]
 
-    st.markdown(
-        f"""
-<div class="kpi-plazo-card kpi-plazo-card-clickable resumen-selector-card">
-    <div class="kpi-plazo-label">{titulo}</div>
-    <div class="kpi-plazo-value resumen-selector-value">{valor_visible}</div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+    valor_actual = st.session_state[key]
 
     def _seleccionar(valor):
         st.session_state[key] = valor
 
     if hasattr(st, "popover"):
         with st.popover(
-            "",
+            f"{titulo}\n{valor_actual}",
             use_container_width=True,
-            help=f"Toca para elegir {titulo.lower()}.",
         ):
-            st.markdown(
-                "<div class='selector-tarjeta-opciones-popover'>",
-                unsafe_allow_html=True,
-            )
             for i, opcion in enumerate(opciones):
                 st.button(
                     str(opcion),
@@ -3062,16 +3049,16 @@ def selector_tarjeta_desplegable(
                     on_click=_seleccionar,
                     args=(opcion,),
                 )
-            st.markdown("</div>", unsafe_allow_html=True)
     else:
-        indice = opciones.index(st.session_state[key])
-        st.selectbox(
+        indice = opciones.index(valor_actual)
+        seleccion = st.selectbox(
             titulo,
             opciones,
             index=indice,
-            key=key,
-            label_visibility="collapsed",
+            key=f"{key_prefix}_fallback",
+            label_visibility="visible",
         )
+        st.session_state[key] = seleccion
 
     return st.session_state[key]
 
@@ -7392,9 +7379,9 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         mostrar_selector_orden = modo_actual in ["Top 10", "Bottom 10"]
 
         if mostrar_selector_orden:
-            cols_selectores = st.columns([1.65, 1.35, 1.75, 0.34])
+            cols_selectores = st.columns([1.55, 1.25, 1.70, 0.28], gap="small")
         else:
-            cols_selectores = st.columns([1.65, 1.35, 0.34])
+            cols_selectores = st.columns([1.55, 1.25, 0.28], gap="small")
 
         with cols_selectores[0]:
             nivel_vista = selector_tarjeta_desplegable(
@@ -7525,14 +7512,35 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
 st.markdown('''
 <style>
-.resumen-selector-card {
-    min-height: 78px !important;
-    margin-bottom: -42px !important;
+div[data-testid="stPopover"] > button {
+    min-height: 72px !important;
+    border: 1px solid #d8deeb !important;
+    border-radius: 14px !important;
+    background: #ffffff !important;
+    color: #0b1b5e !important;
+    font-weight: 700 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding: 12px 16px !important;
+    white-space: pre-line !important;
+    line-height: 1.25 !important;
+    box-shadow: 0 8px 20px rgba(16, 33, 90, 0.06) !important;
 }
-.resumen-selector-card .resumen-selector-value {
+
+div[data-testid="stPopover"] > button svg {
+    display: none !important;
+}
+
+div[data-testid="stPopover"]:has(button[aria-label="🤖"]) > button {
+    min-height: 72px !important;
+    text-align: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
     font-size: 20px !important;
-    line-height: 1.15 !important;
-    white-space: normal !important;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    align-items: stretch !important;
 }
 </style>
 ''', unsafe_allow_html=True)
