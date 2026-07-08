@@ -7678,11 +7678,26 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
         ia_resumen_slot = cols_selectores[indice_ia]
 
-        texto_busqueda = st.text_input(
+        opciones_busqueda = [""] + sorted(
+            {
+                str(valor).strip()
+                for valor in df_mapa[nivel_vista].dropna().tolist()
+                if str(valor).strip()
+            },
+            key=limpiar_texto,
+        )
+
+        texto_busqueda = st.selectbox(
             f"Buscar {nivel_vista}",
-            value="",
-            placeholder=f"Escribe para filtrar por {nivel_vista.lower()}...",
+            opciones_busqueda,
+            index=0,
+            placeholder=f"Escribe para buscar {nivel_vista.lower()}...",
             key=f"busqueda_resumen_{nivel_vista.lower()}",
+            format_func=lambda valor: (
+                f"Escribe para buscar {nivel_vista.lower()}..."
+                if valor == ""
+                else valor
+            ),
         )
 
     group_cols = [nivel_vista]
