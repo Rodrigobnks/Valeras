@@ -1372,6 +1372,130 @@ def cargar_dispersion_diaria(path: str) -> pd.DataFrame:
     return df
 
 
+
+def obtener_totales_dispersion_independientes(
+    fecha_corte_texto: str,
+    nombre_valera: str,
+    incluir_sin_asignar: bool = True,
+    df_contexto: pd.DataFrame | None = None,
+) -> tuple[float, float, float, str]:
+    """
+    Calcula las tarjetas generales directamente desde Dispersion diaria.csv.
+
+    - No exige coincidencia contra Distribuidoras Vale MX.
+    - Usa el último corte disponible de dispersión menor o igual a la fecha
+      seleccionada.
+    - El acumulado considera todas las fechas hasta ese corte.
+    - En una vista de detalle puede respetar Subdirección, Zona y Sucursal
+      usando los valores visibles, sin hacer merge.
+    """
+    ruta_dispersion = resolver_archivo_dispersion()
+    if ruta_dispersion is None:
+        return 0.0, 0.0, 0.0, ""
+
+    try:
+        df_disp = cargar_dispersion_diaria(str(ruta_dispersion)).copy()
+    except Exception:
+        return 0.0, 0.0, 0.0, ""
+
+    if df_disp.empty:
+        return 0.0, 0.0, 0.0, ""
+
+    marca_norm = limpiar_texto(nombre_valera)
+    alias_marcas = {
+        limpiar_texto("Vale Amigo"): {
+            limpiar_texto("Vale Amigo"),
+        },
+        limpiar_texto("Viva Vale"): {
+            limpiar_texto("Viva Vale"),
+        },
+        limpiar_texto("Rapivale"): {
+            limpiar_texto("Rapivale"),
+            limpiar_texto("RapiVale"),
+        },
+        limpiar_texto("Vale Amigo Perú"): {
+            limpiar_texto("Vale Amigo Perú"),
+            limpiar_texto("Vale Amigo Peru"),
+            limpiar_texto("Vale Perú"),
+            limpiar_texto("Vale Peru"),
+            limpiar_texto("Vale Amigo"),
+        },
+    }
+    marcas_validas = alias_marcas.get(marca_norm, {marca_norm})
+
+    df_disp = df_disp[
+        df_disp["Marca"].map(limpiar_texto).isin(marcas_validas)
+    ].copy()
+
+    if not incluir_sin_asignar and "Subdirección" in df_disp.columns:
+        df_disp = df_disp[
+            ~df_disp["Subdirección"].map(es_subdireccion_sin_asignar)
+        ].copy()
+
+    fecha_objetivo = pd.to_datetime(
+        fecha_corte_texto,
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    if pd.isna(fecha_objetivo) or df_disp.empty:
+        return 0.0, 0.0, 0.0, ""
+
+    fechas_disponibles = df_disp.loc[
+        df_disp["Date"] <= fecha_objetivo,
+        "Date",
+    ].dropna()
+
+    if fechas_disponibles.empty:
+        return 0.0, 0.0, 0.0, ""
+
+    fecha_dispersion = fechas_disponibles.max().normalize()
+    df_disp = df_disp[df_disp["Date"] <= fecha_dispersion].copy()
+
+    # En el mapa general no limita por la estructura, para no perder registros.
+    # En una vista de detalle conserva el alcance visible sin hacer un merge.
+    if df_contexto is not None and not df_contexto.empty:
+        for col in ["Subdirección", "Zona", "Sucursal"]:
+            if col not in df_contexto.columns or col not in df_disp.columns:
+                continue
+
+            valores = {
+                limpiar_texto(x)
+                for x in df_contexto[col].dropna().astype(str).tolist()
+                if limpiar_texto(x)
+            }
+
+            if valores:
+                df_disp = df_disp[
+                    df_disp[col].map(limpiar_texto).isin(valores)
+                ].copy()
+
+    total_dispersado = float(
+        pd.to_numeric(
+            df_disp.get("Total Dispersado", 0),
+            errors="coerce",
+        ).fillna(0).sum()
+    )
+    total_canjes = float(
+        pd.to_numeric(
+            df_disp.get("Canjes", 0),
+            errors="coerce",
+        ).fillna(0).sum()
+    )
+    canje_promedio = (
+        total_dispersado / total_canjes
+        if total_canjes
+        else 0.0
+    )
+
+    return (
+        total_dispersado,
+        total_canjes,
+        canje_promedio,
+        fecha_dispersion.strftime("%d/%m/%Y"),
+    )
+
+
 def agregar_columnas_dispersion_vacias(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for col in ["Total Dispersado", "Canjes", "Canje Promedio Acumulado", "Canjes Fecha Corte", "Total Dispersado Fecha Corte"]:
@@ -6023,32 +6147,35 @@ def renderizar_selector_plazo_y_kpis(
     background: rgba(255,255,255,0.96);
     border: 1px solid {COLOR_BORDE};
     border-radius: 16px;
-    padding: 12px 14px;
-    min-height: 82px;
+    padding: 14px 16px;
+    min-height: 94px;
     box-shadow: 0 10px 22px rgba(12, 33, 74, 0.07);
     display: flex;
     flex-direction: column;
     justify-content: center;
-    overflow: hidden;
+    overflow: visible;
 }}
 
 .kpi-plazo-label {{
     color: {COLOR_TEXTO};
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     opacity: 0.86;
-    margin-bottom: 7px;
-    white-space: nowrap;
+    margin-bottom: 8px;
+    white-space: normal;
+    line-height: 1.2;
 }}
 
 .kpi-plazo-value {{
     color: {COLOR_PRIMARIO};
-    font-size: clamp(18px, 1.45vw, 30px);
+    font-size: clamp(16px, 1.12vw, 25px);
     font-weight: 900;
-    line-height: 1.04;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.12;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    word-break: normal;
 }}
 
 .plazo-filter-note {{
@@ -6279,7 +6406,7 @@ div[data-testid="stPopover"] button span {{
     metricas["Corte"] = corte_sel if corte_sel != "Sin corte" else metricas.get("Corte", "")
 
     with st.expander("Plazo", expanded=True):
-        cols = st.columns([0.82, 0.98, 0.86, 0.98, 0.98, 0.82, 0.72])
+        cols = st.columns([0.76, 0.92, 0.88, 1.18, 1.18, 0.90, 0.82], gap="small")
 
         with cols[0]:
             renderizar_tarjeta_selector(
@@ -6928,7 +7055,7 @@ def mostrar_mapa(valera_param: str):
 
     key_sin_asignar = f"mostrar_sin_asignar_{valera_param}"
     if key_sin_asignar not in st.session_state:
-        st.session_state[key_sin_asignar] = True
+        st.session_state[key_sin_asignar] = False
 
     col_fecha_corte, col_sin_asignar = st.columns([8.8, 1.2], gap="small")
 
@@ -7036,9 +7163,27 @@ def mostrar_mapa(valera_param: str):
     total_suc = int(df_resumen_base["Sucursal"].nunique())
     total_zonas = int(df_resumen_base["Zona"].nunique())
     total_sub = int(df_resumen_base["Subdirección"].nunique())
-    total_dispersado_acum = pd.to_numeric(df_resumen_base.get("Total Dispersado", 0), errors="coerce").fillna(0).sum()
-    total_canjes_acum = pd.to_numeric(df_resumen_base.get("Canjes", 0), errors="coerce").fillna(0).sum()
-    canje_promedio_acum = total_dispersado_acum / total_canjes_acum if total_canjes_acum else 0
+
+    # Las tarjetas de dispersión se calculan directamente desde su propia base.
+    # En la vista general no dependen del match con la estructura.
+    # En el detalle respetan el alcance territorial visible.
+    contexto_dispersion = (
+        df_resumen_base
+        if (subdireccion_sel or estado_sel)
+        else None
+    )
+
+    (
+        total_dispersado_acum,
+        total_canjes_acum,
+        canje_promedio_acum,
+        fecha_corte_dispersion,
+    ) = obtener_totales_dispersion_independientes(
+        fecha_corte_texto=fecha_sel,
+        nombre_valera=nombre_valera,
+        incluir_sin_asignar=st.session_state[key_sin_asignar],
+        df_contexto=contexto_dispersion,
+    )
 
 
     st.markdown(
@@ -7083,12 +7228,6 @@ def mostrar_mapa(valera_param: str):
 </div>
 """,
         unsafe_allow_html=True,
-    )
-
-    mostrar_grafica_categorias(
-        fecha_corte_texto=fecha_sel,
-        nombre_valera=nombre_valera,
-        df_resumen_base=df_resumen_base,
     )
 
     # Los botones de Vista y Tamaño se muestran debajo del mapa.
@@ -7136,7 +7275,7 @@ def mostrar_mapa(valera_param: str):
                     "tipo_mapa_valeras",
                     "Subdirección",
                 ),
-                opciones=["Subdirección", "Calor Canjes"],
+                opciones=["Subdirección", "Calor Canjes", "Categorías"],
                 key="tipo_mapa_valeras",
                 default="Subdirección",
                 key_prefix="selector_tipo_mapa",
@@ -7180,6 +7319,13 @@ def mostrar_mapa(valera_param: str):
 
     tipo_mapa = st.session_state.get("tipo_mapa_valeras", tipo_mapa)
     variable_tamano = st.session_state.get("variable_tamano", variable_tamano)
+
+    if tipo_mapa == "Categorías":
+        mostrar_grafica_categorias(
+            fecha_corte_texto=fecha_sel,
+            nombre_valera=nombre_valera,
+            df_resumen_base=df_resumen_base,
+        )
 
     resumen_ejecutivo_html = mostrar_comentarios_ia(
         df_resumen_base=df_resumen_base,
