@@ -1537,16 +1537,15 @@ def recalcular_canje_promedio(df: pd.DataFrame) -> pd.DataFrame:
 # ======================================================
 def resolver_archivo_categoria_dispersion() -> Path | None:
     """
-    Usa primero el archivo exacto Categoría dispersión.csv.
-    Sólo busca variantes si ese archivo no existe.
+    Busca la base de categorías en la misma carpeta del app.
+    Acepta nombres con o sin acento y versiones como (1), (2), etc.
+    Si existen varias copias, utiliza la más reciente.
     """
-    if ARCHIVO_CATEGORIA_DISPERSION.exists():
-        return ARCHIVO_CATEGORIA_DISPERSION
-
     candidatos = []
     vistos = set()
 
     rutas_directas = [
+        ARCHIVO_CATEGORIA_DISPERSION,
         BASE_DIR / "Categoria dispersión.csv",
         BASE_DIR / "Categoría dispersion.csv",
         BASE_DIR / "Categoria dispersion.csv",
@@ -1580,9 +1579,14 @@ def resolver_archivo_categoria_dispersion() -> Path | None:
 def cargar_categoria_dispersion(path: str) -> pd.DataFrame:
     df = leer_csv_seguro(Path(path))
 
+    # Evita que encabezados duplicados provoquen que df["Marca"] devuelva
+    # un DataFrame en lugar de una Serie.
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
     renombres = {}
     for col in df.columns:
         col_norm = limpiar_texto(col)
+
         if col_norm in ["CORTE", "DATE", "FECHA", "FECHA CORTE", "FECHA DE CORTE"]:
             renombres[col] = "Corte"
         elif col_norm in ["CATEGORIA", "CATEGORÍA"]:
@@ -1600,19 +1604,39 @@ def cargar_categoria_dispersion(path: str) -> pd.DataFrame:
 
     df = df.rename(columns=renombres)
 
+    # Después del renombrado también pueden quedar nombres duplicados
+    # si el archivo traía dos columnas equivalentes.
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
     requeridas = ["Corte", "Marca", "Categoria", "Capital"]
     faltantes = [c for c in requeridas if c not in df.columns]
+
     if faltantes:
         raise ValueError(
-            "El archivo de categorías no tiene estas columnas: " + ", ".join(faltantes)
+            "El archivo de categorías no tiene estas columnas: "
+            + ", ".join(faltantes)
         )
 
     columnas = requeridas + [
-        c for c in ["Marca", "Subdirección", "Zona", "Sucursal"] if c in df.columns
+        c for c in ["Subdirección", "Zona", "Sucursal"]
+        if c in df.columns
     ]
     df = df[columnas].copy()
 
-    df["Corte"] = pd.to_datetime(df["Corte"], errors="coerce", dayfirst=True)
+    df["Corte"] = pd.to_datetime(
+        df["Corte"],
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    df["Marca"] = (
+        df["Marca"]
+        .fillna("Sin dato")
+        .astype(str)
+        .str.strip()
+        .replace("", "Sin dato")
+    )
+
     df["Categoria"] = (
         df["Categoria"]
         .fillna("Sin categoría")
@@ -1620,11 +1644,18 @@ def cargar_categoria_dispersion(path: str) -> pd.DataFrame:
         .str.strip()
         .replace("", "Sin categoría")
     )
+
     df["Capital"] = convertir_numero(df["Capital"]).fillna(0)
 
-    for col in ["Marca", "Subdirección", "Zona", "Sucursal"]:
+    for col in ["Subdirección", "Zona", "Sucursal"]:
         if col in df.columns:
-            df[col] = df[col].fillna("Sin dato").astype(str).str.strip()
+            df[col] = (
+                df[col]
+                .fillna("Sin dato")
+                .astype(str)
+                .str.strip()
+                .replace("", "Sin dato")
+            )
 
     return df.dropna(subset=["Corte"]).copy()
 
@@ -1666,37 +1697,39 @@ def obtener_categoria_al_corte(
     df_cat = df_cat[df_cat["Corte"].dt.normalize() == fecha_usada].copy()
 
     filtros_aplicados = []
+    if "Marca" in df_cat.columns:
+        # La gráfica de categorías se separa correctamente por la valera abierta.
+        # Se aceptan únicamente variantes de escritura de la misma marca.
+        marca_valera_norm = limpiar_texto(nombre_valera)
 
-    marca_valera_norm = limpiar_texto(nombre_valera)
+        alias_marcas = {
+            limpiar_texto("Vale Amigo"): {
+                limpiar_texto("Vale Amigo"),
+            },
+            limpiar_texto("Viva Vale"): {
+                limpiar_texto("Viva Vale"),
+            },
+            limpiar_texto("Rapivale"): {
+                limpiar_texto("Rapivale"),
+                limpiar_texto("RapiVale"),
+            },
+            limpiar_texto("Vale Amigo Perú"): {
+                limpiar_texto("Vale Amigo Perú"),
+                limpiar_texto("Vale Amigo Peru"),
+                limpiar_texto("Vale Perú"),
+                limpiar_texto("Vale Peru"),
+            },
+        }
 
-    alias_marcas = {
-        limpiar_texto("Vale Amigo"): {
-            limpiar_texto("Vale Amigo"),
-        },
-        limpiar_texto("Viva Vale"): {
-            limpiar_texto("Viva Vale"),
-        },
-        limpiar_texto("Rapivale"): {
-            limpiar_texto("Rapivale"),
-            limpiar_texto("RapiVale"),
-        },
-        limpiar_texto("Vale Amigo Perú"): {
-            limpiar_texto("Vale Amigo Perú"),
-            limpiar_texto("Vale Amigo Peru"),
-            limpiar_texto("Vale Perú"),
-            limpiar_texto("Vale Peru"),
-        },
-    }
+        marcas_objetivo = alias_marcas.get(
+            marca_valera_norm,
+            {marca_valera_norm},
+        )
 
-    marcas_objetivo = alias_marcas.get(
-        marca_valera_norm,
-        {marca_valera_norm},
-    )
-
-    df_cat = df_cat[
-        df_cat["Marca"].map(limpiar_texto).isin(marcas_objetivo)
-    ].copy()
-    filtros_aplicados.append("marca")
+        df_cat = df_cat[
+            df_cat["Marca"].map(limpiar_texto).isin(marcas_objetivo)
+        ].copy()
+        filtros_aplicados.append("marca")
 
     for col in ["Subdirección", "Zona", "Sucursal"]:
         if col in df_cat.columns and col in df_resumen_base.columns:
@@ -1718,7 +1751,7 @@ def obtener_categoria_al_corte(
     alcance = (
         "La gráfica responde a los filtros del tablero."
         if filtros_aplicados
-        else "La gráfica muestra las categorías de la marca seleccionada."
+        else "La base de categorías sólo trae Corte, Categoria y Capital; por eso la gráfica muestra el total general del corte."
     )
     return resumen, fecha_usada.strftime("%d/%m/%Y"), alcance
 
