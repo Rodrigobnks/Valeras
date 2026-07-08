@@ -3501,9 +3501,16 @@ def configurar_columnas_tabla(df: pd.DataFrame) -> dict:
 
     columnas_grandes = {
         "Calidad de Cartera",
+        "Colocado PP",
+        "Cartera",
+        "Colocado Neto",
+        "Colocado Neto al Corriente",
+        "Mora",
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Total Dispersado",
@@ -3566,6 +3573,8 @@ def preparar_tabla_para_mostrar(
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Canjes",
@@ -3573,6 +3582,11 @@ def preparar_tabla_para_mostrar(
     ]
 
     columnas_moneda = [
+        "Colocado PP",
+        "Cartera",
+        "Colocado Neto",
+        "Colocado Neto al Corriente",
+        "Mora",
         "Total Dispersado",
         "Canje Promedio Acumulado",
         "Total Dispersado Fecha Corte",
@@ -7671,33 +7685,36 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
             Sucursales=("Sucursales", "sum"),
             Zonas=("Zonas", "sum"),
             Calidad_de_Cartera=("Calidad de Cartera", "mean"),
+            Colocado_PP=("Colocado PP", "sum"),
+            Cartera=("Cartera Financiera", "sum"),
+            Colocado_Neto=("Colocado Neto", "sum"),
+            Colocado_Neto_al_Corriente=("Colocado Neto al Corriente", "sum"),
+            Mora=("Mora", "sum"),
             Distribuidoras_Totales=("Distribuidoras Totales", "sum"),
             Distribuidoras_al_Corriente=("Distribuidoras al Corriente", "sum"),
             Distribuidoras_en_Mora=("Distribuidoras en Mora", "sum"),
-            Var_Dist_Corriente=("Var Dist Corriente", "sum"),
-            Var_Dist_en_Mora=("Var Dist en Mora", "sum"),
-            Total_Dispersado=("Total Dispersado", "sum"),
-            Canjes=("Canjes", "sum"),
-            Canjes_Fecha_Corte=("Canjes Fecha Corte", "sum"),
-            Total_Dispersado_Fecha_Corte=("Total Dispersado Fecha Corte", "sum"),
+            Clientes_Totales=("Clientes Totales", "sum"),
+            Clientes_al_Corriente=("Clientes al Corriente", "sum"),
         )
     )
 
     resumen_nivel = resumen_nivel.rename(
         columns={
             "Calidad_de_Cartera": "Calidad de Cartera",
+            "Colocado_PP": "Colocado PP",
+            "Colocado_Neto": "Colocado Neto",
+            "Colocado_Neto_al_Corriente": "Colocado Neto al Corriente",
             "Distribuidoras_Totales": "Distribuidoras Totales",
             "Distribuidoras_al_Corriente": "Distribuidoras al Corriente",
             "Distribuidoras_en_Mora": "Distribuidoras en Mora",
-            "Var_Dist_Corriente": "Var Dist Corriente",
-            "Var_Dist_en_Mora": "Var Dist en Mora",
-            "Total_Dispersado": "Total Dispersado",
-            "Canjes_Fecha_Corte": "Canjes Fecha Corte",
-            "Total_Dispersado_Fecha_Corte": "Total Dispersado Fecha Corte",
+            "Clientes_Totales": "Clientes Totales",
+            "Clientes_al_Corriente": "Clientes al Corriente",
         }
     )
-    resumen_nivel = agregar_columnas_variacion(resumen_nivel)
-    resumen_nivel = recalcular_canje_promedio(resumen_nivel)
+
+    # Se conserva la columna técnica para que el estilo existente siga funcionando,
+    # aunque ya no se muestre ninguna variable de variación en esta tabla.
+    resumen_nivel["Semaforo Variacion"] = ""
 
     if texto_busqueda.strip():
         busqueda_norm = limpiar_texto(texto_busqueda)
