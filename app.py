@@ -2517,40 +2517,6 @@ st.markdown(
     background: var(--azul-oscuro);
 }}
 
-/* Robot de resumen ejecutivo: permanece fijo junto a “Volver a Valeras”. */
-div[data-testid="stElementContainer"]:has(#robot-summary-anchor) {{
-    display: none !important;
-}}
-
-div[data-testid="stElementContainer"]:has(#robot-summary-anchor)
-+ div[data-testid="stElementContainer"] {{
-    position: fixed !important;
-    top: 34px !important;
-    right: 190px !important;
-    width: auto !important;
-    z-index: 999999 !important;
-}}
-
-div[data-testid="stElementContainer"]:has(#robot-summary-anchor)
-+ div[data-testid="stElementContainer"] div[data-testid="stPopover"] > button {{
-    width: 44px !important;
-    min-width: 44px !important;
-    height: 44px !important;
-    padding: 0 !important;
-    border-radius: 12px !important;
-    border: 1px solid rgba(11, 42, 111, 0.24) !important;
-    background: white !important;
-    color: var(--azul) !important;
-    font-size: 23px !important;
-    box-shadow: 0 8px 20px rgba(11, 42, 111, 0.20) !important;
-}}
-
-div[data-testid="stElementContainer"]:has(#robot-summary-anchor)
-+ div[data-testid="stElementContainer"] div[data-testid="stPopover"] > button:hover {{
-    transform: translateY(-1px);
-    border-color: var(--azul) !important;
-}}
-
 .map-title {{
     color: var(--azul);
     font-size: 42px;
@@ -3555,7 +3521,7 @@ def html_guia_mapa_previa(tipo_mapa: str) -> str:
         <li>Pasa el cursor sobre una bolita para consultar sucursal, subdirección, zona, calidad, distribuidoras, canjes y dispersión.</li>
         <li>Usa <b>Subdirección</b> para identificar cobertura territorial por estructura operativa.</li>
         <li>Usa <b>Calor Canjes</b> para detectar concentración de canjes del día exacto de corte.</li>
-        <li>Cambia el tamaño de las bolitas entre <b>Distribuidoras Totales</b> y <b>Distribuidoras en Mora</b>.</li>
+        <li>Usa <b>Calor Dispersado</b> para ubicar la concentración del importe dispersado en el día exacto de corte.</li>
         <li>Da clic en un estado para entrar al detalle territorial y vuelve con el botón de regreso.</li>
     </ul>
 </div>
@@ -3579,6 +3545,7 @@ def mostrar_comentarios_ia(
     solo_ejecutivo: bool = False,
     ocultar_ejecutivo: bool = False,
     conservar_tarjetas: bool = False,
+    devolver_html: bool = False,
 ):
     if df_resumen_base.empty:
         return
@@ -3792,9 +3759,109 @@ def mostrar_comentarios_ia(
             resumen_html = '<div class="ai-grid">' + partes[1]
             resumen_html = resumen_html.split('\n\n<div class="ai-panel">\n    <h3>Cómo usar los botones de resumen</h3>', 1)[0]
 
+    if devolver_html:
+        return resumen_html
+
     st.markdown(resumen_html, unsafe_allow_html=True)
+    return None
 
 
+
+def renderizar_robot_resumen_ejecutivo(resumen_html: str) -> None:
+    """Muestra un robot fijo junto a Volver a Valeras y abre el resumen en un panel flotante."""
+    robot_id = "robot_resumen_ejecutivo"
+    st.markdown(
+        f"""
+<style>
+.robot-summary-toggle {{ display: none; }}
+
+.robot-summary-button {{
+    position: fixed;
+    top: 34px;
+    right: 190px;
+    z-index: 100001;
+    width: 44px;
+    height: 44px;
+    border: 1px solid rgba(31, 43, 119, 0.35);
+    border-radius: 11px;
+    background: #ffffff;
+    color: #1f2b77;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 23px;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(31, 43, 119, 0.18);
+    user-select: none;
+}}
+
+.robot-summary-button:hover {{
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px rgba(31, 43, 119, 0.24);
+}}
+
+.robot-summary-overlay {{
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    background: rgba(6, 16, 55, 0.22);
+}}
+
+.robot-summary-panel {{
+    position: fixed;
+    top: 92px;
+    right: 28px;
+    z-index: 100002;
+    width: min(760px, calc(100vw - 56px));
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    padding: 22px;
+    border: 1px solid rgba(31, 43, 119, 0.18);
+    border-left: 6px solid #1f2b77;
+    border-radius: 18px;
+    background: #ffffff;
+    box-shadow: 0 22px 60px rgba(13, 27, 84, 0.25);
+    display: none;
+}}
+
+.robot-summary-close {{
+    position: sticky;
+    top: 0;
+    float: right;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: #1f2b77;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: 800;
+    margin: -6px -6px 8px 12px;
+}}
+
+#{robot_id}:checked ~ .robot-summary-overlay,
+#{robot_id}:checked ~ .robot-summary-panel {{ display: block; }}
+
+@media (max-width: 900px) {{
+    .robot-summary-button {{ right: 164px; top: 30px; }}
+    .robot-summary-panel {{ right: 14px; width: calc(100vw - 28px); }}
+}}
+</style>
+
+<input class="robot-summary-toggle" type="checkbox" id="{robot_id}">
+<label class="robot-summary-button" for="{robot_id}" title="Ver resumen ejecutivo">🤖</label>
+<label class="robot-summary-overlay" for="{robot_id}"></label>
+<div class="robot-summary-panel">
+    <label class="robot-summary-close" for="{robot_id}" title="Cerrar">×</label>
+    {resumen_html}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def obtener_corte_desde_base(df: pd.DataFrame | None, default: str = "") -> str:
@@ -6782,44 +6849,27 @@ def mostrar_mapa(valera_param: str):
         variable_tamano=variable_tamano,
     )
 
+    if st.session_state.get("tipo_mapa_valeras") == "Calor Dispersado":
+        st.session_state["tipo_mapa_valeras"] = "Subdirección"
+    if st.session_state.get("variable_tamano") not in ["Distribuidoras Totales", "Distribuidoras en Mora"]:
+        st.session_state["variable_tamano"] = "Distribuidoras Totales"
+
     tipo_mapa = st.session_state.get("tipo_mapa_valeras", "Subdirección")
 
-    # El resumen ejecutivo ya no ocupa espacio dentro de la página.
-    # Se abre desde el robot fijo de la esquina superior derecha.
-    st.markdown('<div id="robot-summary-anchor"></div>', unsafe_allow_html=True)
-    try:
-        with st.popover(
-            "🤖",
-            help="Abrir resumen ejecutivo de todas las bases",
-            use_container_width=False,
-        ):
-            st.markdown("### Resumen ejecutivo")
-            mostrar_comentarios_ia(
-                df_resumen_base=df_resumen_base,
-                df_mapa=df_mapa_previo,
-                resumen_pais=pd.DataFrame(),
-                nombre_valera=nombre_valera,
-                fecha_sel=fecha_sel,
-                nivel_vista=nivel_vista,
-                variable_tamano=variable_tamano,
-                tipo_mapa=tipo_mapa,
-                solo_ejecutivo=True,
-                conservar_tarjetas=bool(subdireccion_sel or estado_sel),
-            )
-    except Exception:
-        with st.expander("🤖 Resumen ejecutivo", expanded=False):
-            mostrar_comentarios_ia(
-                df_resumen_base=df_resumen_base,
-                df_mapa=df_mapa_previo,
-                resumen_pais=pd.DataFrame(),
-                nombre_valera=nombre_valera,
-                fecha_sel=fecha_sel,
-                nivel_vista=nivel_vista,
-                variable_tamano=variable_tamano,
-                tipo_mapa=tipo_mapa,
-                solo_ejecutivo=True,
-                conservar_tarjetas=bool(subdireccion_sel or estado_sel),
-            )
+    resumen_ejecutivo_html = mostrar_comentarios_ia(
+        df_resumen_base=df_resumen_base,
+        df_mapa=df_mapa_previo,
+        resumen_pais=pd.DataFrame(),
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+        nivel_vista=nivel_vista,
+        variable_tamano=variable_tamano,
+        tipo_mapa=tipo_mapa,
+        solo_ejecutivo=True,
+        conservar_tarjetas=bool(subdireccion_sel or estado_sel),
+        devolver_html=True,
+    )
+    renderizar_robot_resumen_ejecutivo(resumen_ejecutivo_html or "")
 
     # Detecta el país de los datos actuales, aunque la marca no tenga pais_exclusivo configurado.
     paises_datos = sorted(df_filtrado["País"].dropna().unique().tolist())
@@ -6975,27 +7025,18 @@ def mostrar_mapa(valera_param: str):
         mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
 
     if mostrar_botones_tipo_mapa:
-        # Conserva por defecto la estructura por Subdirección.
-        if st.session_state.get("tipo_mapa_valeras") == "Calor Dispersado":
-            st.session_state["tipo_mapa_valeras"] = "Subdirección"
-
-        # El tamaño del mapa sólo cambia entre el universo total y la mora.
-        opciones_tamano_mapa = ["Distribuidoras Totales", "Distribuidoras en Mora"]
-        if st.session_state.get("variable_tamano") not in opciones_tamano_mapa:
-            st.session_state["variable_tamano"] = "Distribuidoras Totales"
-
-        cols_tipo_mapa_bajo_leyenda = st.columns([1.05, 1.25])
-        with cols_tipo_mapa_bajo_leyenda[0]:
+        cols_tipo_mapa_bajo_leyenda = st.columns([1.25, 1, 1])
+        with cols_tipo_mapa_bajo_leyenda[1]:
             tipo_mapa = selector_botones(
                 "Tipo de mapa",
                 ["Subdirección", "Calor Canjes"],
                 "tipo_mapa_valeras",
                 "Subdirección",
             )
-        with cols_tipo_mapa_bajo_leyenda[1]:
+        with cols_tipo_mapa_bajo_leyenda[2]:
             variable_tamano = selector_botones(
-                "Tamaño de las bolitas",
-                opciones_tamano_mapa,
+                "Tamaño de bolita",
+                ["Distribuidoras Totales", "Distribuidoras en Mora"],
                 "variable_tamano",
                 "Distribuidoras Totales",
             )
@@ -7080,7 +7121,7 @@ def mostrar_mapa(valera_param: str):
 
 **Todos** muestra el universo completo. **Top 10** y **Bottom 10** aíslan los mejores o peores registros según la variable seleccionada.
 
-**Distribuidoras Totales y Distribuidoras en Mora** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** definen la variable usada para ordenar Top/Bottom y para dimensionar las bolitas del mapa.
 
 Cuando estás dentro del detalle de una subdirección o estado, los botones **Top 10** y **Bottom 10** sólo se muestran si el nivel seleccionado tiene **20 o más elementos**. En este momento hay **{elementos_estructura_actual:,}** elementos en **{nivel_vista}**, por eso la vista permite comparar extremos sin perder contexto operativo.
 
@@ -7096,7 +7137,7 @@ En el detalle de esta selección hay **{elementos_estructura_actual:,}** element
 
 En este caso, la tabla se mantiene completa y se ordena automáticamente de **mayor a menor** según la variable seleccionada: **{variable_tamano}**. Así puedes ver primero las estructuras con mayor peso operativo sin ocultar ningún registro.
 
-**Distribuidoras Totales y Distribuidoras en Mora** cambian la variable de ordenamiento y también la referencia de tamaño de las bolitas del mapa.
+**Calidad de Cartera, Distribuidoras Totales y Distribuidoras al Corriente** cambian la variable de ordenamiento y también la referencia de tamaño de las bolitas del mapa.
 
 El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 """
@@ -7141,7 +7182,7 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
         modo_tabla = st.session_state["modo_tabla_resumen"]
 
-        cols_variable_top_bottom = st.columns(len(opciones_tamano))
+        cols_variable_top_bottom = st.columns(3)
         for col, opcion in zip(cols_variable_top_bottom, opciones_tamano):
             tipo = "primary" if st.session_state.get("variable_tamano") == opcion else "secondary"
             if col.button(opcion, type=tipo, use_container_width=True, key=f"variable_tamano_resumen_{opcion}"):
