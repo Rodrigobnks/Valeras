@@ -7723,26 +7723,25 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
             )[:8]
 
             if sugerencias:
-                st.caption("Sugerencias")
-                columnas_sugerencias = st.columns(
-                    min(4, len(sugerencias)),
-                    gap="small",
+                seleccion_sugerida = st.selectbox(
+                    "Sugerencias",
+                    options=[""] + sugerencias,
+                    index=0,
+                    placeholder="Selecciona una sugerencia...",
+                    key=f"sugerencias_desplegable_{nivel_vista.lower()}",
+                    format_func=lambda valor: (
+                        "Selecciona una sugerencia..."
+                        if valor == ""
+                        else valor
+                    ),
                 )
 
-                for indice, sugerencia in enumerate(sugerencias):
-                    with columnas_sugerencias[
-                        indice % len(columnas_sugerencias)
-                    ]:
-                        st.button(
-                            sugerencia,
-                            key=(
-                                f"sugerencia_{nivel_vista.lower()}_"
-                                f"{indice}_{limpiar_texto(sugerencia)}"
-                            ),
-                            use_container_width=True,
-                            on_click=seleccionar_sugerencia_busqueda,
-                            args=(key_busqueda, sugerencia),
-                        )
+                if seleccion_sugerida:
+                    st.session_state[key_busqueda] = seleccion_sugerida
+                    st.session_state[
+                        f"sugerencias_desplegable_{nivel_vista.lower()}"
+                    ] = ""
+                    st.rerun()
 
     group_cols = [nivel_vista]
 
