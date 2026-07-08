@@ -3015,6 +3015,67 @@ def selector_botones_vertical(
     return st.session_state[key]
 
 
+def selector_tarjeta_desplegable(
+    titulo: str,
+    valor_visible: str,
+    opciones: list[str],
+    key: str,
+    default: str,
+    key_prefix: str,
+) -> str:
+    if key not in st.session_state or st.session_state[key] not in opciones:
+        st.session_state[key] = default if default in opciones else opciones[0]
+
+    st.markdown(
+        f"""
+<div class="kpi-plazo-card kpi-plazo-card-clickable resumen-selector-card">
+    <div class="kpi-plazo-label">{titulo}</div>
+    <div class="kpi-plazo-value resumen-selector-value">{valor_visible}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    def _seleccionar(valor):
+        st.session_state[key] = valor
+
+    if hasattr(st, "popover"):
+        with st.popover(
+            "",
+            use_container_width=True,
+            help=f"Toca para elegir {titulo.lower()}.",
+        ):
+            st.markdown(
+                "<div class='selector-tarjeta-opciones-popover'>",
+                unsafe_allow_html=True,
+            )
+            for i, opcion in enumerate(opciones):
+                st.button(
+                    str(opcion),
+                    key=f"{key_prefix}_{i}_{limpiar_texto(opcion)}",
+                    type=(
+                        "primary"
+                        if st.session_state.get(key) == opcion
+                        else "secondary"
+                    ),
+                    use_container_width=True,
+                    on_click=_seleccionar,
+                    args=(opcion,),
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        indice = opciones.index(st.session_state[key])
+        st.selectbox(
+            titulo,
+            opciones,
+            index=indice,
+            key=key,
+            label_visibility="collapsed",
+        )
+
+    return st.session_state[key]
+
+
 # ======================================================
 # RESÚMENES
 # ======================================================
@@ -7314,51 +7375,67 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 """
 
     with st.container(border=True):
-        cols_resumen_titulo = st.columns([2.55, 0.25, 1, 1, 1])
-        with cols_resumen_titulo[0]:
-            st.markdown(
-                f'''
-<div class="resumen-title-box">
-    <div class="resumen-title-text">Resumen por {nivel_vista.lower()}</div>
-</div>
-''',
-                unsafe_allow_html=True,
-            )
-        with cols_resumen_titulo[1]:
-            try:
-                with st.popover("ⓘ", use_container_width=True):
-                    st.markdown(texto_ayuda_resumen)
-            except Exception:
-                with st.expander("ⓘ", expanded=False):
-                    st.markdown(texto_ayuda_resumen)
-
-        for col, opcion in zip(cols_resumen_titulo[2:], opciones_vista):
-            tipo = "primary" if st.session_state.get("nivel_vista") == opcion else "secondary"
-            if col.button(opcion, type=tipo, use_container_width=True, key=f"nivel_vista_resumen_{opcion}"):
-                st.session_state["nivel_vista"] = opcion
-                st.rerun()
-
         if "modo_tabla_resumen" not in st.session_state:
             st.session_state["modo_tabla_resumen"] = "Todos"
 
-        if mostrar_top_bottom_detalle:
-            cols_modo_tabla = st.columns(3)
-            for col, opcion in zip(cols_modo_tabla, ["Todos", "Top 10", "Bottom 10"]):
-                tipo = "primary" if st.session_state.get("modo_tabla_resumen") == opcion else "secondary"
-                if col.button(opcion, type=tipo, use_container_width=True, key=f"modo_tabla_resumen_{opcion}"):
-                    st.session_state["modo_tabla_resumen"] = opcion
-                    st.rerun()
-        else:
+        if not mostrar_top_bottom_detalle:
             st.session_state["modo_tabla_resumen"] = "Todos"
 
-        modo_tabla = st.session_state["modo_tabla_resumen"]
+        opciones_modo_resumen = (
+            ["Todos", "Top 10", "Bottom 10"]
+            if mostrar_top_bottom_detalle
+            else ["Todos"]
+        )
 
-        cols_variable_top_bottom = st.columns(3)
-        for col, opcion in zip(cols_variable_top_bottom, opciones_tamano):
-            tipo = "primary" if st.session_state.get("variable_tamano") == opcion else "secondary"
-            if col.button(opcion, type=tipo, use_container_width=True, key=f"variable_tamano_resumen_{opcion}"):
-                st.session_state["variable_tamano"] = opcion
-                st.rerun()
+        # Primera fila: nivel, alcance, ordenamiento condicional e IA.
+        modo_actual = st.session_state.get("modo_tabla_resumen", "Todos")
+        mostrar_selector_orden = modo_actual in ["Top 10", "Bottom 10"]
+
+        if mostrar_selector_orden:
+            cols_selectores = st.columns([1.65, 1.35, 1.75, 0.34])
+        else:
+            cols_selectores = st.columns([1.65, 1.35, 0.34])
+
+        with cols_selectores[0]:
+            nivel_vista = selector_tarjeta_desplegable(
+                titulo="Resumen por",
+                valor_visible=st.session_state.get("nivel_vista", nivel_vista),
+                opciones=opciones_vista,
+                key="nivel_vista",
+                default=nivel_vista,
+                key_prefix="selector_nivel_resumen",
+            )
+
+        with cols_selectores[1]:
+            modo_tabla = selector_tarjeta_desplegable(
+                titulo="Mostrar",
+                valor_visible=st.session_state.get("modo_tabla_resumen", "Todos"),
+                opciones=opciones_modo_resumen,
+                key="modo_tabla_resumen",
+                default="Todos",
+                key_prefix="selector_modo_resumen",
+            )
+
+        indice_ia = 2
+        if mostrar_selector_orden:
+            with cols_selectores[2]:
+                variable_tamano = selector_tarjeta_desplegable(
+                    titulo="Ordenar según",
+                    valor_visible=st.session_state.get(
+                        "variable_tamano",
+                        "Distribuidoras Totales",
+                    ),
+                    opciones=[
+                        "Distribuidoras Totales",
+                        "Distribuidoras en Mora",
+                    ],
+                    key="variable_tamano",
+                    default="Distribuidoras Totales",
+                    key_prefix="selector_variable_resumen",
+                )
+            indice_ia = 3
+
+        ia_resumen_slot = cols_selectores[indice_ia]
 
         texto_busqueda = st.text_input(
             f"Buscar {nivel_vista}",
@@ -7420,7 +7497,7 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         variable_tamano=variable_tamano,
     )
 
-    mostrar_comentario_ia_tabla_resumen(
+    comentario_resumen_html = construir_comentario_ia_tabla_resumen(
         resumen_tabla=resumen_nivel,
         nivel_vista=nivel_vista,
         variable_tamano=variable_tamano,
@@ -7430,6 +7507,14 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         df_fuente=df_resumen_base,
     )
 
+    with ia_resumen_slot:
+        try:
+            with st.popover("🤖", use_container_width=True):
+                st.markdown(comentario_resumen_html, unsafe_allow_html=True)
+        except Exception:
+            with st.expander("🤖", expanded=False):
+                st.markdown(comentario_resumen_html, unsafe_allow_html=True)
+
     mostrar_tabla_variacion(
         resumen_nivel,
         columnas_ocultas=["Coordinaciones", "Sucursales", "Zonas"],
@@ -7437,6 +7522,20 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         mostrar_indice_ordenado=(modo_tabla in ["Top 10", "Bottom 10"]),
     )
 
+
+st.markdown('''
+<style>
+.resumen-selector-card {
+    min-height: 78px !important;
+    margin-bottom: -42px !important;
+}
+.resumen-selector-card .resumen-selector-value {
+    font-size: 20px !important;
+    line-height: 1.15 !important;
+    white-space: normal !important;
+}
+</style>
+''', unsafe_allow_html=True)
 
 # ======================================================
 # ROUTER
