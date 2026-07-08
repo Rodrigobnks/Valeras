@@ -594,6 +594,10 @@ def aplicar_coordenadas_y_estado(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def seleccionar_sugerencia_busqueda(key: str, valor: str):
+    st.session_state[key] = valor
+
+
 def get_query_param(nombre: str, default: str = "") -> str:
     try:
         valor = st.query_params.get(nombre, default)
@@ -7678,7 +7682,7 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
         ia_resumen_slot = cols_selectores[indice_ia]
 
-        opciones_busqueda = [""] + sorted(
+        opciones_busqueda = sorted(
             {
                 str(valor).strip()
                 for valor in df_mapa[nivel_vista].dropna().tolist()
@@ -7687,18 +7691,58 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
             key=limpiar_texto,
         )
 
-        texto_busqueda = st.selectbox(
+        key_busqueda = f"busqueda_resumen_{nivel_vista.lower()}"
+
+        texto_busqueda = st.text_input(
             f"Buscar {nivel_vista}",
-            opciones_busqueda,
-            index=0,
+            value="",
             placeholder=f"Escribe para buscar {nivel_vista.lower()}...",
-            key=f"busqueda_resumen_{nivel_vista.lower()}",
-            format_func=lambda valor: (
-                f"Escribe para buscar {nivel_vista.lower()}..."
-                if valor == ""
-                else valor
-            ),
+            key=key_busqueda,
         )
+
+        if texto_busqueda.strip():
+            busqueda_norm = limpiar_texto(texto_busqueda)
+
+            sugerencias_inicio = [
+                valor
+                for valor in opciones_busqueda
+                if limpiar_texto(valor).startswith(busqueda_norm)
+            ]
+
+            sugerencias_contenido = [
+                valor
+                for valor in opciones_busqueda
+                if (
+                    busqueda_norm in limpiar_texto(valor)
+                    and valor not in sugerencias_inicio
+                )
+            ]
+
+            sugerencias = (
+                sugerencias_inicio + sugerencias_contenido
+            )[:8]
+
+            if sugerencias:
+                st.caption("Sugerencias")
+                columnas_sugerencias = st.columns(
+                    min(4, len(sugerencias)),
+                    gap="small",
+                )
+
+                for indice, sugerencia in enumerate(sugerencias):
+                    with columnas_sugerencias[
+                        indice % len(columnas_sugerencias)
+                    ]:
+                        st.button(
+                            sugerencia,
+                            key=(
+                                f"sugerencia_{nivel_vista.lower()}_"
+                                f"{indice}_{limpiar_texto(sugerencia)}"
+                            ),
+                            use_container_width=True,
+                            on_click=seleccionar_sugerencia_busqueda,
+                            args=(key_busqueda, sugerencia),
+                        )
 
     group_cols = [nivel_vista]
 
