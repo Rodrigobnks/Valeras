@@ -4811,8 +4811,41 @@ def agregar_burbujas_sucursales(
     if df_plot.empty:
         return
 
-    max_global = pd.to_numeric(df_suc[variable_tamano], errors="coerce").fillna(0).max()
-    sizeref = max(max_global, 1) / 55
+    # El tamaño se calcula de forma independiente para la variable seleccionada.
+    # Así, en "Distribuidoras Totales" las bolitas varían por el total de cada
+    # sucursal y, en "Distribuidoras en Mora", varían por la mora de cada sucursal.
+    valores_tamano = pd.to_numeric(
+        df_plot.get(variable_tamano, 0), errors="coerce"
+    ).fillna(0).clip(lower=0)
+
+    positivos = valores_tamano[valores_tamano > 0]
+    tamano_min_px = 7.0
+    tamano_max_px = 42.0
+
+    if positivos.empty:
+        df_plot["__Tamano_Burbuja"] = tamano_min_px
+    else:
+        minimo_positivo = float(positivos.min())
+        maximo = float(positivos.max())
+
+        if maximo == minimo_positivo:
+            # Si todas las sucursales tienen el mismo dato, se conserva un tamaño medio.
+            df_plot["__Tamano_Burbuja"] = valores_tamano.apply(
+                lambda x: 24.0 if x > 0 else tamano_min_px
+            )
+        else:
+            # Escala por raíz cuadrada para conservar proporcionalidad visual
+            # sin permitir que una sola sucursal haga invisibles a las demás.
+            raiz_min = minimo_positivo ** 0.5
+            raiz_max = maximo ** 0.5
+
+            def calcular_tamano(valor):
+                if valor <= 0:
+                    return tamano_min_px
+                proporcion = ((valor ** 0.5) - raiz_min) / (raiz_max - raiz_min)
+                return tamano_min_px + proporcion * (tamano_max_px - tamano_min_px)
+
+            df_plot["__Tamano_Burbuja"] = valores_tamano.map(calcular_tamano)
 
     for col in ["Total Dispersado", "Canjes", "Canje Promedio Acumulado", "Canjes Fecha Corte", "Total Dispersado Fecha Corte"]:
         if col not in df_plot.columns:
@@ -4873,10 +4906,9 @@ def agregar_burbujas_sucursales(
                 lon=df_plot["Longitud"],
                 mode="markers",
                 marker=dict(
-                    size=pd.to_numeric(df_plot[variable_tamano], errors="coerce").fillna(0),
-                    sizemode="area",
-                    sizeref=sizeref,
-                    sizemin=8,
+                    size=df_plot["__Tamano_Burbuja"],
+                    sizemode="diameter",
+                    sizemin=4,
                     color=pd.to_numeric(df_plot[heat_col], errors="coerce").fillna(0),
                     colorscale=[
                         [0.0, "#D73027"],
@@ -4911,10 +4943,9 @@ def agregar_burbujas_sucursales(
                 lon=g["Longitud"],
                 mode="markers",
                 marker=dict(
-                    size=pd.to_numeric(g[variable_tamano], errors="coerce").fillna(0),
-                    sizemode="area",
-                    sizeref=sizeref,
-                    sizemin=8,
+                    size=g["__Tamano_Burbuja"],
+                    sizemode="diameter",
+                    sizemin=4,
                     color=mapa_color[subdir],
                     line=dict(width=1.1, color=COLOR_LINEA_MAPA_65),
                     opacity=0.90,
