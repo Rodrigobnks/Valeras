@@ -1667,12 +1667,37 @@ def obtener_categoria_al_corte(
 
     filtros_aplicados = []
     if "Marca" in df_cat.columns:
-        marcas_objetivo = {limpiar_texto(nombre_valera)}
-        if "Marca" in df_resumen_base.columns:
-            marcas_objetivo.update(
-                limpiar_texto(x) for x in df_resumen_base["Marca"].dropna().unique()
-            )
-        df_cat = df_cat[df_cat["Marca"].map(limpiar_texto).isin(marcas_objetivo)].copy()
+        # La gráfica de categorías se separa correctamente por la valera abierta.
+        # Se aceptan únicamente variantes de escritura de la misma marca.
+        marca_valera_norm = limpiar_texto(nombre_valera)
+
+        alias_marcas = {
+            limpiar_texto("Vale Amigo"): {
+                limpiar_texto("Vale Amigo"),
+            },
+            limpiar_texto("Viva Vale"): {
+                limpiar_texto("Viva Vale"),
+            },
+            limpiar_texto("Rapivale"): {
+                limpiar_texto("Rapivale"),
+                limpiar_texto("RapiVale"),
+            },
+            limpiar_texto("Vale Amigo Perú"): {
+                limpiar_texto("Vale Amigo Perú"),
+                limpiar_texto("Vale Amigo Peru"),
+                limpiar_texto("Vale Perú"),
+                limpiar_texto("Vale Peru"),
+            },
+        }
+
+        marcas_objetivo = alias_marcas.get(
+            marca_valera_norm,
+            {marca_valera_norm},
+        )
+
+        df_cat = df_cat[
+            df_cat["Marca"].map(limpiar_texto).isin(marcas_objetivo)
+        ].copy()
         filtros_aplicados.append("marca")
 
     for col in ["Subdirección", "Zona", "Sucursal"]:
@@ -1737,7 +1762,7 @@ def mostrar_grafica_categorias(
     )
     fig.update_layout(
         title={
-            "text": f"Categorías de dispersión al {fecha_usada}",
+            "text": f"Categorías de dispersión · {nombre_valera} · al {fecha_usada}",
             "x": 0.02,
             "xanchor": "left",
         },
