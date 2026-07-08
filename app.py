@@ -39,6 +39,7 @@ ARCHIVO_GEOJSON_MX = BASE_DIR / "mexico_estados.geojson"
 ARCHIVO_GEOJSON_PE = BASE_DIR / "peru_departamentos.geojson"
 ARCHIVO_GEOJSON_MUN_MX = BASE_DIR / "mexico_municipios.geojson"
 ARCHIVO_INTERPRETACION_NEGOCIO = BASE_DIR / "interpretacion_negocio_vales.md"
+ARCHIVO_CLIENTES = BASE_DIR / "Clientes.csv"
 
 
 # ======================================================
@@ -1229,6 +1230,257 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
 
     return df
 
+
+
+
+# ======================================================
+# LECTURA DE CLIENTES Y TIPOS DE DESEMBOLSO
+# ======================================================
+@st.cache_data(show_spinner=False)
+def cargar_clientes_tipos_desembolso(path: str) -> pd.DataFrame:
+    df = leer_csv_seguro(Path(path))
+
+    renombres = {}
+    for col in df.columns:
+        col_norm = limpiar_texto(col)
+
+        if col_norm in ["CORTE", "FECHA", "DATE", "FECHA DE CORTE"]:
+            renombres[col] = "Corte"
+        elif col_norm in ["SUBDIRECCION", "SUBDIRECCIÓN"]:
+            renombres[col] = "Subdirección"
+        elif col_norm == "ZONA":
+            renombres[col] = "Zona"
+        elif col_norm == "SUCURSAL":
+            renombres[col] = "Sucursal"
+        elif col_norm in ["COORDINACION", "COORDINACIÓN"]:
+            renombres[col] = "Coordinacion"
+        elif col_norm == "NUEVO":
+            renombres[col] = "Nuevo"
+        elif col_norm in ["*RENOVACION", "RENOVACION"]:
+            renombres[col] = "*Renovación"
+        elif col_norm in [
+            "**RENOVACION ANTICIPADA",
+            "RENOVACION ANTICIPADA",
+        ]:
+            renombres[col] = "**Renovación Anticipada"
+        elif col_norm == "VALE SOBRE VALE":
+            renombres[col] = "Vale sobre vale"
+        elif col_norm in ["TOTAL CANJES", "CANJES TOTALES"]:
+            renombres[col] = "Total Canjes"
+
+    df = df.rename(columns=renombres)
+
+    requeridas = [
+        "Corte",
+        "Subdirección",
+        "Zona",
+        "Sucursal",
+        "Nuevo",
+        "*Renovación",
+        "**Renovación Anticipada",
+        "Vale sobre vale",
+        "Total Canjes",
+    ]
+
+    faltantes = [col for col in requeridas if col not in df.columns]
+    if faltantes:
+        raise ValueError(
+            "Clientes.csv no tiene estas columnas: "
+            + ", ".join(faltantes)
+        )
+
+    columnas = requeridas + (
+        ["Coordinacion"] if "Coordinacion" in df.columns else []
+    )
+    df = df[columnas].copy()
+
+    df["Corte"] = pd.to_datetime(
+        df["Corte"],
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    for col in [
+        "Subdirección",
+        "Zona",
+        "Sucursal",
+        "Coordinacion",
+    ]:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .fillna("Sin dato")
+                .astype(str)
+                .str.strip()
+                .replace("", "Sin dato")
+            )
+
+    for col in [
+        "Nuevo",
+        "*Renovación",
+        "**Renovación Anticipada",
+        "Vale sobre vale",
+        "Total Canjes",
+    ]:
+        df[col] = convertir_numero(df[col]).fillna(0)
+
+    return df.dropna(subset=["Corte"]).copy()
+
+
+def mostrar_tarjetas_tipos_desembolso(
+    df_contexto: pd.DataFrame,
+    selected_node_id: str | None,
+    fecha_referencia: str,
+):
+    """
+    Muestra las tarjetas únicamente después de seleccionar un bloque del treemap.
+
+    Porcentaje = cantidad del tipo de desembolso / Total Canjes
+    dentro del nivel de estructura seleccionado.
+    """
+    if not selected_node_id:
+        return
+
+    if not ARCHIVO_CLIENTES.exists():
+        st.warning("No encontré el archivo Clientes.csv.")
+        return
+
+    try:
+        df_clientes = cargar_clientes_tipos_desembolso(
+            str(ARCHIVO_CLIENTES)
+        )
+    except Exception as e:
+        st.warning(f"No pude leer Clientes.csv: {e}")
+        return
+
+    if df_clientes.empty:
+        return
+
+    fecha_objetivo = pd.to_datetime(
+        fecha_referencia,
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    if pd.isna(fecha_objetivo):
+        fecha_objetivo = df_clientes["Corte"].max()
+
+    fechas_validas = df_clientes.loc[
+        df_clientes["Corte"] <= fecha_objetivo,
+        "Corte",
+    ]
+
+    if fechas_validas.empty:
+        return
+
+    corte_usado = fechas_validas.max().normalize()
+    df_clientes = df_clientes[
+        df_clientes["Corte"].dt.normalize() == corte_usado
+    ].copy()
+
+    df_nodo = filtrar_df_por_nodo_treemap(
+        df_contexto,
+        selected_node_id,
+    )
+
+    for col in ["Subdirección", "Zona", "Sucursal"]:
+        if col not in df_nodo.columns or col not in df_clientes.columns:
+            continue
+
+        valores = {
+            limpiar_texto(valor)
+            for valor in df_nodo[col].dropna().astype(str).tolist()
+            if limpiar_texto(valor)
+        }
+
+        if valores:
+            df_clientes = df_clientes[
+                df_clientes[col].map(limpiar_texto).isin(valores)
+            ].copy()
+
+    if df_clientes.empty:
+        st.info(
+            "No hay información de tipos de desembolso para "
+            "el bloque seleccionado."
+        )
+        return
+
+    total_canjes = float(
+        pd.to_numeric(
+            df_clientes["Total Canjes"],
+            errors="coerce",
+        ).fillna(0).sum()
+    )
+
+    tipos = [
+        ("Nuevo", "#1F628E"),
+        ("*Renovación", "#83C1AB"),
+        ("**Renovación Anticipada", "#D6B968"),
+        ("Vale sobre vale", "#E8A77D"),
+    ]
+
+    etiqueta_nodo = etiqueta_nodo_treemap(selected_node_id)
+
+    st.markdown(
+        f"""
+        <div style="
+            margin:18px 0 10px 0;
+            color:#071D68;
+            font-size:14px;
+            font-weight:800;
+        ">
+            Tipos de desembolso · {etiqueta_nodo} ·
+            Corte {corte_usado.strftime("%d/%m/%Y")}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    columnas = st.columns(4, gap="small")
+
+    for columna, (tipo, color) in zip(columnas, tipos):
+        cantidad = float(
+            pd.to_numeric(
+                df_clientes[tipo],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+        porcentaje = (
+            cantidad / total_canjes * 100
+            if total_canjes
+            else 0
+        )
+
+        with columna:
+            st.markdown(
+                f"""
+                <div style="
+                    background:{color};
+                    border-radius:2px;
+                    padding:14px 12px;
+                    min-height:82px;
+                    box-shadow:0 8px 14px rgba(0,0,0,0.20);
+                    text-align:center;
+                    color:#071D68;
+                ">
+                    <div style="
+                        font-size:21px;
+                        font-weight:900;
+                        line-height:1.05;
+                    ">
+                        {porcentaje:,.2f}%
+                    </div>
+                    <div style="
+                        margin-top:8px;
+                        font-size:12px;
+                        font-weight:700;
+                    ">
+                        {tipo}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 # ======================================================
@@ -6892,6 +7144,13 @@ def construir_mapa_estado_plazo_composicion(
     renderizar_guia_interaccion_mapa_financiero()
     selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, estado, selection_key)
 
+    nodo_clientes = selected_node_id_actual or selected_node_id
+    mostrar_tarjetas_tipos_desembolso(
+        df_contexto=df_suc_filtrado,
+        selected_node_id=nodo_clientes,
+        fecha_referencia=corte_actual or fecha_texto,
+    )
+
     mostrar_comentario_ia_mapa_plazo_composicion(
         df_plazo=df_suc_filtrado,
         nombre_valera=nombre_valera,
@@ -6970,6 +7229,13 @@ def construir_mapa_subdireccion_plazo_composicion(
 
     renderizar_guia_interaccion_mapa_financiero()
     selected_node_id_actual = renderizar_treemap_plazo_con_click(fig, subdireccion, selection_key)
+
+    nodo_clientes = selected_node_id_actual or selected_node_id
+    mostrar_tarjetas_tipos_desembolso(
+        df_contexto=df_suc_filtrado,
+        selected_node_id=nodo_clientes,
+        fecha_referencia=corte_actual or fecha_texto,
+    )
 
     mostrar_comentario_ia_mapa_plazo_composicion(
         df_plazo=df_suc_filtrado,
@@ -7302,7 +7568,7 @@ def mostrar_mapa(valera_param: str):
                     "tipo_mapa_valeras",
                     "Subdirección",
                 ),
-                opciones=["Subdirección", "Calor Canjes", "Categorías"],
+                opciones=["Subdirección", "Calor Canjes"],
                 key="tipo_mapa_valeras",
                 default="Subdirección",
                 key_prefix="selector_tipo_mapa",
@@ -7380,13 +7646,13 @@ def mostrar_mapa(valera_param: str):
     )
 
     with columna_principal_mapa:
-        if tipo_mapa == "Categorías":
-            mostrar_grafica_categorias(
-                fecha_corte_texto=fecha_sel,
-                nombre_valera=nombre_valera,
-                df_resumen_base=df_resumen_base,
-            )
-        elif subdireccion_sel and (es_mexico or es_peru):
+        mostrar_grafica_categorias(
+            fecha_corte_texto=fecha_sel,
+            nombre_valera=nombre_valera,
+            df_resumen_base=df_resumen_base,
+        )
+
+        if subdireccion_sel and (es_mexico or es_peru):
             nombre_pais_volver = "México" if es_mexico else "Perú"
             st.markdown(
                 f"""
@@ -7495,13 +7761,10 @@ def mostrar_mapa(valera_param: str):
 
             st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
     vista_detalle_actual_para_comentario = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
-    mostrar_comentario_mapa_estructura = (
-        tipo_mapa != "Categorías"
-        and not (
-            (subdireccion_sel or estado_sel)
-            and (es_mexico or es_peru)
-            and vista_detalle_actual_para_comentario == "Plazo y composición"
-        )
+    mostrar_comentario_mapa_estructura = not (
+        (subdireccion_sel or estado_sel)
+        and (es_mexico or es_peru)
+        and vista_detalle_actual_para_comentario == "Plazo y composición"
     )
 
     if mostrar_comentario_mapa_estructura:
@@ -7693,55 +7956,31 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
         key_busqueda = f"busqueda_resumen_{nivel_vista.lower()}"
 
-        texto_busqueda = st.text_input(
-            f"Buscar {nivel_vista}",
-            value="",
-            placeholder=f"Escribe para buscar {nivel_vista.lower()}...",
-            key=key_busqueda,
-        )
+        try:
+            texto_busqueda = st.selectbox(
+                f"Buscar {nivel_vista}",
+                options=opciones_busqueda,
+                index=None,
+                placeholder=(
+                    f"Escribe para buscar "
+                    f"{nivel_vista.lower()}..."
+                ),
+                key=key_busqueda,
+                accept_new_options=True,
+            )
+        except TypeError:
+            texto_busqueda = st.selectbox(
+                f"Buscar {nivel_vista}",
+                options=opciones_busqueda,
+                index=None,
+                placeholder=(
+                    f"Escribe para buscar "
+                    f"{nivel_vista.lower()}..."
+                ),
+                key=key_busqueda,
+            )
 
-        if texto_busqueda.strip():
-            busqueda_norm = limpiar_texto(texto_busqueda)
-
-            sugerencias_inicio = [
-                valor
-                for valor in opciones_busqueda
-                if limpiar_texto(valor).startswith(busqueda_norm)
-            ]
-
-            sugerencias_contenido = [
-                valor
-                for valor in opciones_busqueda
-                if (
-                    busqueda_norm in limpiar_texto(valor)
-                    and valor not in sugerencias_inicio
-                )
-            ]
-
-            sugerencias = (
-                sugerencias_inicio + sugerencias_contenido
-            )[:8]
-
-            if sugerencias:
-                seleccion_sugerida = st.selectbox(
-                    "Sugerencias",
-                    options=[""] + sugerencias,
-                    index=0,
-                    placeholder="Selecciona una sugerencia...",
-                    key=f"sugerencias_desplegable_{nivel_vista.lower()}",
-                    format_func=lambda valor: (
-                        "Selecciona una sugerencia..."
-                        if valor == ""
-                        else valor
-                    ),
-                )
-
-                if seleccion_sugerida:
-                    st.session_state[key_busqueda] = seleccion_sugerida
-                    st.session_state[
-                        f"sugerencias_desplegable_{nivel_vista.lower()}"
-                    ] = ""
-                    st.rerun()
+        texto_busqueda = texto_busqueda or ""
 
     group_cols = [nivel_vista]
 
