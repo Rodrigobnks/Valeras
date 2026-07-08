@@ -5224,6 +5224,13 @@ def construir_mapa_estados_mexico(
 
     evento = None
 
+    st.markdown(
+        "<div style='margin:0 0 8px 4px;color:#5f6f95;font-size:13px;font-weight:600;'>"
+        "Da click en una bolita para entrar al detalle por Subdirección."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     try:
         evento = st.plotly_chart(
             fig,
@@ -5323,6 +5330,13 @@ def construir_mapa_estados_peru(
     )
 
     evento = None
+
+    st.markdown(
+        "<div style='margin:0 0 8px 4px;color:#5f6f95;font-size:13px;font-weight:600;'>"
+        "Da click en una bolita para entrar al detalle por Subdirección."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     try:
         evento = st.plotly_chart(
