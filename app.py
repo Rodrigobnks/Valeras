@@ -7053,7 +7053,7 @@ def mostrar_mapa(valera_param: str):
     if not fechas:
         fechas = ["Sin fecha"]
 
-    key_sin_asignar = f"mostrar_sin_asignar_{valera_param}"
+    key_sin_asignar = f"mostrar_sin_asignar_v2_{valera_param}"
     if key_sin_asignar not in st.session_state:
         st.session_state[key_sin_asignar] = False
 
@@ -7320,13 +7320,6 @@ def mostrar_mapa(valera_param: str):
     tipo_mapa = st.session_state.get("tipo_mapa_valeras", tipo_mapa)
     variable_tamano = st.session_state.get("variable_tamano", variable_tamano)
 
-    if tipo_mapa == "Categorías":
-        mostrar_grafica_categorias(
-            fecha_corte_texto=fecha_sel,
-            nombre_valera=nombre_valera,
-            df_resumen_base=df_resumen_base,
-        )
-
     resumen_ejecutivo_html = mostrar_comentarios_ia(
         df_resumen_base=df_resumen_base,
         df_mapa=df_mapa_previo,
@@ -7360,7 +7353,13 @@ def mostrar_mapa(valera_param: str):
     )
 
     with columna_principal_mapa:
-        if subdireccion_sel and (es_mexico or es_peru):
+        if tipo_mapa == "Categorías":
+            mostrar_grafica_categorias(
+                fecha_corte_texto=fecha_sel,
+                nombre_valera=nombre_valera,
+                df_resumen_base=df_resumen_base,
+            )
+        elif subdireccion_sel and (es_mexico or es_peru):
             nombre_pais_volver = "México" if es_mexico else "Perú"
             st.markdown(
                 f"""
@@ -7469,10 +7468,13 @@ def mostrar_mapa(valera_param: str):
 
             st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
     vista_detalle_actual_para_comentario = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
-    mostrar_comentario_mapa_estructura = not (
-        (subdireccion_sel or estado_sel)
-        and (es_mexico or es_peru)
-        and vista_detalle_actual_para_comentario == "Plazo y composición"
+    mostrar_comentario_mapa_estructura = (
+        tipo_mapa != "Categorías"
+        and not (
+            (subdireccion_sel or estado_sel)
+            and (es_mexico or es_peru)
+            and vista_detalle_actual_para_comentario == "Plazo y composición"
+        )
     )
 
     if mostrar_comentario_mapa_estructura:
