@@ -6113,7 +6113,7 @@ def renderizar_guia_interaccion_mapa_financiero():
 .map-help-widget {{
     position: absolute;
     top: 12px;
-    left: 700px;
+    left: -48px;
     right: auto;
     z-index: 9999;
     display: inline-block;
@@ -7696,6 +7696,11 @@ def mostrar_mapa(valera_param: str):
 
     if mostrar_botones_tipo_mapa:
         with columna_lateral_mapa:
+            st.markdown(
+                "<div style='height:455px;'></div>",
+                unsafe_allow_html=True,
+            )
+
             renderizar_guia_interaccion_mapa(
                 st.session_state.get(
                     "tipo_mapa_valeras",
