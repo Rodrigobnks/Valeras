@@ -1176,6 +1176,8 @@ def cargar_distribuidoras_mx(path: str) -> pd.DataFrame:
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Colocado PP",
@@ -3241,9 +3243,23 @@ def preparar_mapa_por_nivel(
     else:
         agg_dict[variable_tamano] = (variable_tamano, "sum")
 
-    for col in ["Calidad de Cartera", "Distribuidoras Totales", "Distribuidoras al Corriente"]:
+    for col in [
+        "Calidad de Cartera",
+        "Colocado PP",
+        "Cartera Financiera",
+        "Colocado Neto",
+        "Colocado Neto al Corriente",
+        "Mora",
+        "Distribuidoras Totales",
+        "Distribuidoras al Corriente",
+        "Clientes Totales",
+        "Clientes al Corriente",
+    ]:
         if col not in agg_dict and col in df.columns:
-            agg_dict[col] = (col, "mean" if col == "Calidad de Cartera" else "sum")
+            agg_dict[col] = (
+                col,
+                "mean" if col == "Calidad de Cartera" else "sum",
+            )
 
     df_agg = (
         df.groupby(group_cols, as_index=False)
@@ -3501,16 +3517,9 @@ def configurar_columnas_tabla(df: pd.DataFrame) -> dict:
 
     columnas_grandes = {
         "Calidad de Cartera",
-        "Colocado PP",
-        "Cartera",
-        "Colocado Neto",
-        "Colocado Neto al Corriente",
-        "Mora",
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
-        "Clientes Totales",
-        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Total Dispersado",
@@ -3573,8 +3582,6 @@ def preparar_tabla_para_mostrar(
         "Distribuidoras Totales",
         "Distribuidoras al Corriente",
         "Distribuidoras en Mora",
-        "Clientes Totales",
-        "Clientes al Corriente",
         "Var Dist Corriente",
         "Var Dist en Mora",
         "Canjes",
@@ -7678,12 +7685,27 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
 
     group_cols = [nivel_vista]
 
+    columnas_tabla_requeridas = [
+        "Calidad de Cartera",
+        "Colocado PP",
+        "Cartera Financiera",
+        "Colocado Neto",
+        "Colocado Neto al Corriente",
+        "Mora",
+        "Distribuidoras Totales",
+        "Distribuidoras al Corriente",
+        "Distribuidoras en Mora",
+        "Clientes Totales",
+        "Clientes al Corriente",
+    ]
+
+    for col in columnas_tabla_requeridas:
+        if col not in df_mapa.columns:
+            df_mapa[col] = 0
+
     resumen_nivel = (
         df_mapa.groupby(group_cols, as_index=False)
         .agg(
-            Coordinaciones=("Coordinaciones", "sum"),
-            Sucursales=("Sucursales", "sum"),
-            Zonas=("Zonas", "sum"),
             Calidad_de_Cartera=("Calidad de Cartera", "mean"),
             Colocado_PP=("Colocado PP", "sum"),
             Cartera=("Cartera Financiera", "sum"),
@@ -7712,8 +7734,6 @@ El buscador filtra por el nivel activo: subdirección, zona o sucursal.
         }
     )
 
-    # Se conserva la columna técnica para que el estilo existente siga funcionando,
-    # aunque ya no se muestre ninguna variable de variación en esta tabla.
     resumen_nivel["Semaforo Variacion"] = ""
 
     if texto_busqueda.strip():
