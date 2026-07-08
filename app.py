@@ -2981,6 +2981,40 @@ def selector_botones(titulo: str, opciones: list[str], key: str, default: str) -
     return st.session_state[key]
 
 
+
+def selector_botones_vertical(
+    titulo: str,
+    opciones: list[str],
+    key: str,
+    default: str,
+) -> str:
+    if titulo:
+        st.markdown(
+            f"""
+<div class="selector-box">
+<div class="small-caption">{titulo}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+    for opcion in opciones:
+        tipo = "primary" if st.session_state[key] == opcion else "secondary"
+        if st.button(
+            opcion,
+            type=tipo,
+            use_container_width=True,
+            key=f"{key}_vertical_{opcion}",
+        ):
+            st.session_state[key] = opcion
+            st.rerun()
+
+    return st.session_state[key]
+
+
 # ======================================================
 # RESÚMENES
 # ======================================================
@@ -4679,7 +4713,7 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 <style>
 .map-help-layer {{
     position: relative;
-    height: 0;
+    min-height: 54px;
     z-index: 50;
 }}
 
@@ -4688,9 +4722,9 @@ def renderizar_guia_interaccion_mapa(tipo_mapa: str):
 }}
 
 .map-help-widget {{
-    position: absolute;
-    top: 12px;
-    left: 700px;
+    position: relative;
+    top: 0;
+    left: 0;
     right: auto;
     z-index: 9999;
     display: inline-block;
@@ -5139,7 +5173,6 @@ def construir_mapa_estados_mexico(
     fig.update_layout(
         title=f"Mapa político de México con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     evento = None
 
@@ -5240,7 +5273,6 @@ def construir_mapa_estados_peru(
     fig.update_layout(
         title=f"Mapa político de Perú con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     evento = None
 
@@ -5457,7 +5489,6 @@ def construir_mapa_estado_burbujas(
     fig.update_layout(
         title=f"{estado} - {titulo_division} con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
     )
-    renderizar_guia_interaccion_mapa(tipo_mapa)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -6971,23 +7002,29 @@ def mostrar_mapa(valera_param: str):
         )
         mostrar_botones_tipo_mapa = vista_detalle_actual == "Estructura"
 
-    # Controles colocados arriba del mapa, alineados a la izquierda,
-    # en la zona señalada por el usuario.
-    if mostrar_botones_tipo_mapa:
-        controles_izq, controles_centro, controles_espacio = st.columns(
-            [1.55, 1.75, 5.70]
-        )
+    # Columna lateral fija para el ícono de ayuda y los controles del mapa.
+    columna_lateral_mapa, columna_principal_mapa = st.columns(
+        [1.20, 8.80],
+        gap="medium",
+    )
 
-        with controles_izq:
-            tipo_mapa = selector_botones(
+    if mostrar_botones_tipo_mapa:
+        with columna_lateral_mapa:
+            renderizar_guia_interaccion_mapa(
+                st.session_state.get(
+                    "tipo_mapa_valeras",
+                    "Subdirección",
+                )
+            )
+
+            tipo_mapa = selector_botones_vertical(
                 "Tipo de mapa",
                 ["Subdirección", "Calor Canjes"],
                 "tipo_mapa_valeras",
                 "Subdirección",
             )
 
-        with controles_centro:
-            variable_tamano = selector_botones(
+            variable_tamano = selector_botones_vertical(
                 "Tamaño de bolita",
                 ["Distribuidoras Totales", "Distribuidoras en Mora"],
                 "variable_tamano",
@@ -7050,110 +7087,110 @@ def mostrar_mapa(valera_param: str):
         texto_busqueda=texto_busqueda_actual,
     )
 
-    if subdireccion_sel and (es_mexico or es_peru):
-        nombre_pais_volver = "México" if es_mexico else "Perú"
-        st.markdown(
-            f"""
-<a class="back-link" href="?valera={valera_param}" target="_self">← Volver al mapa de {nombre_pais_volver}</a>
-""",
-            unsafe_allow_html=True,
-        )
+    with columna_principal_mapa:
+        if subdireccion_sel and (es_mexico or es_peru):
+            nombre_pais_volver = "México" if es_mexico else "Perú"
+            st.markdown(
+                f"""
+    <a class="back-link" href="?valera={valera_param}" target="_self">← Volver al mapa de {nombre_pais_volver}</a>
+    """,
+                unsafe_allow_html=True,
+            )
 
-        st.markdown(
-            f"""
-<div class="resumen-title-box" style="margin-bottom:12px;">
-    <div class="resumen-title-text">Detalle activo por Subdirección: <b>{subdireccion_sel}</b></div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                f"""
+    <div class="resumen-title-box" style="margin-bottom:12px;">
+        <div class="resumen-title-text">Detalle activo por Subdirección: <b>{subdireccion_sel}</b></div>
+    </div>
+    """,
+                unsafe_allow_html=True,
+            )
 
-        vista_detalle_estado = selector_botones(
-            "Vista del detalle",
-            ["Estructura", "Plazo y composición"],
-            "vista_detalle_estado_valeras",
-            "Estructura",
-        )
+            vista_detalle_estado = selector_botones(
+                "Vista del detalle",
+                ["Estructura", "Plazo y composición"],
+                "vista_detalle_estado_valeras",
+                "Estructura",
+            )
 
-        if vista_detalle_estado == "Plazo y composición":
-            if estado_sel:
-                construir_mapa_estado_plazo_composicion(
-                    df=df_resumen_base,
-                    nombre_valera=nombre_valera,
-                    estado=estado_sel,
-                    fecha_texto=fecha_sel,
-                    pais=pais_actual,
-                )
+            if vista_detalle_estado == "Plazo y composición":
+                if estado_sel:
+                    construir_mapa_estado_plazo_composicion(
+                        df=df_resumen_base,
+                        nombre_valera=nombre_valera,
+                        estado=estado_sel,
+                        fecha_texto=fecha_sel,
+                        pais=pais_actual,
+                    )
+                else:
+                    construir_mapa_subdireccion_plazo_composicion(
+                        df=df_resumen_base,
+                        nombre_valera=nombre_valera,
+                        subdireccion=subdireccion_sel,
+                        fecha_texto=fecha_sel,
+                        pais=pais_actual,
+                    )
             else:
-                construir_mapa_subdireccion_plazo_composicion(
-                    df=df_resumen_base,
-                    nombre_valera=nombre_valera,
-                    subdireccion=subdireccion_sel,
-                    fecha_texto=fecha_sel,
-                    pais=pais_actual,
-                )
+                if estado_sel:
+                    construir_mapa_estado_burbujas(
+                        df=df_resumen_base,
+                        nombre_valera=nombre_valera,
+                        estado=estado_sel,
+                        variable_tamano=variable_tamano,
+                        fecha_texto=fecha_sel,
+                        pais=pais_actual,
+                        destacar_nivel=nivel_vista,
+                        destacar_valores=valores_destacados_mapa,
+                        tipo_mapa=tipo_mapa,
+                    )
+                elif es_mexico:
+                    construir_mapa_estados_mexico(
+                        df=df_resumen_base,
+                        nombre_valera=nombre_valera,
+                        variable_tamano=variable_tamano,
+                        fecha_texto=fecha_sel,
+                        destacar_nivel=nivel_vista,
+                        destacar_valores=valores_destacados_mapa,
+                        tipo_mapa=tipo_mapa,
+                    )
+                else:
+                    construir_mapa_estados_peru(
+                        df=df_resumen_base,
+                        nombre_valera=nombre_valera,
+                        variable_tamano=variable_tamano,
+                        fecha_texto=fecha_sel,
+                        destacar_nivel=nivel_vista,
+                        destacar_valores=valores_destacados_mapa,
+                        tipo_mapa=tipo_mapa,
+                    )
+        elif es_mexico:
+            construir_mapa_estados_mexico(
+                df=df_filtrado,
+                nombre_valera=nombre_valera,
+                variable_tamano=variable_tamano,
+                fecha_texto=fecha_sel,
+                destacar_nivel=nivel_vista,
+                destacar_valores=valores_destacados_mapa,
+                tipo_mapa=tipo_mapa,
+            )
+        elif es_peru:
+            construir_mapa_estados_peru(
+                df=df_filtrado,
+                nombre_valera=nombre_valera,
+                variable_tamano=variable_tamano,
+                fecha_texto=fecha_sel,
+                destacar_nivel=nivel_vista,
+                destacar_valores=valores_destacados_mapa,
+                tipo_mapa=tipo_mapa,
+            )
         else:
-            if estado_sel:
-                construir_mapa_estado_burbujas(
-                    df=df_resumen_base,
-                    nombre_valera=nombre_valera,
-                    estado=estado_sel,
-                    variable_tamano=variable_tamano,
-                    fecha_texto=fecha_sel,
-                    pais=pais_actual,
-                    destacar_nivel=nivel_vista,
-                    destacar_valores=valores_destacados_mapa,
-                    tipo_mapa=tipo_mapa,
-                )
-            elif es_mexico:
-                construir_mapa_estados_mexico(
-                    df=df_resumen_base,
-                    nombre_valera=nombre_valera,
-                    variable_tamano=variable_tamano,
-                    fecha_texto=fecha_sel,
-                    destacar_nivel=nivel_vista,
-                    destacar_valores=valores_destacados_mapa,
-                    tipo_mapa=tipo_mapa,
-                )
-            else:
-                construir_mapa_estados_peru(
-                    df=df_resumen_base,
-                    nombre_valera=nombre_valera,
-                    variable_tamano=variable_tamano,
-                    fecha_texto=fecha_sel,
-                    destacar_nivel=nivel_vista,
-                    destacar_valores=valores_destacados_mapa,
-                    tipo_mapa=tipo_mapa,
-                )
-    elif es_mexico:
-        construir_mapa_estados_mexico(
-            df=df_filtrado,
-            nombre_valera=nombre_valera,
-            variable_tamano=variable_tamano,
-            fecha_texto=fecha_sel,
-            destacar_nivel=nivel_vista,
-            destacar_valores=valores_destacados_mapa,
-            tipo_mapa=tipo_mapa,
-        )
-    elif es_peru:
-        construir_mapa_estados_peru(
-            df=df_filtrado,
-            nombre_valera=nombre_valera,
-            variable_tamano=variable_tamano,
-            fecha_texto=fecha_sel,
-            destacar_nivel=nivel_vista,
-            destacar_valores=valores_destacados_mapa,
-            tipo_mapa=tipo_mapa,
-        )
-    else:
-        df_mapa = preparar_mapa_por_nivel(
-            df=df_filtrado,
-            nivel_vista=nivel_vista,
-            variable_tamano=variable_tamano,
-        )
+            df_mapa = preparar_mapa_por_nivel(
+                df=df_filtrado,
+                nivel_vista=nivel_vista,
+                variable_tamano=variable_tamano,
+            )
 
-        st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
-
+            st.warning("La vista política por estado/departamento está configurada para México y Perú. Esta vista conserva el mapa de burbujas.")
     vista_detalle_actual_para_comentario = st.session_state.get("vista_detalle_estado_valeras", "Estructura")
     mostrar_comentario_mapa_estructura = not (
         (subdireccion_sel or estado_sel)
