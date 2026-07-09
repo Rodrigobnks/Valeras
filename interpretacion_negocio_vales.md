@@ -74,7 +74,7 @@ La línea de crédito revolvente se libera conforme el cliente paga capital. Est
 
 ## 5. Categorías de distribuidora
 
-Las categorías Bronce, Plata, Oro, Platino, Diamante y Embajadoras se asignan con base en el monto colocado por la distribuidora. La categoría permite identificar su nivel de desarrollo comercial, capacidad de colocación y bonificación potencial.
+Las categorías Bronce, Plata, Oro, Platino, Diamante y Embajadoras se asignan con base en el monto colocado por la distribuidora. La categoría permite identificar su nivel de desarrollo comercial, capacidad de colocación y bonificación potencial. Colocado es igual a capital.
 
 La clasificación debe realizarse considerando dos elementos:
 
