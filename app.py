@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import re
 import unicodedata
 import urllib.request
@@ -9,6 +10,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 try:
     from streamlit_plotly_events import plotly_events
@@ -4418,102 +4424,267 @@ def mostrar_comentarios_ia(
 
 
 
-def renderizar_robot_resumen_ejecutivo(resumen_html: str) -> None:
-    """Muestra un robot fijo junto a Volver a Valeras y abre el resumen en un panel flotante."""
-    robot_id = "robot_resumen_ejecutivo"
-    st.markdown(
-        f"""
-<style>
-.robot-summary-toggle {{ display: none; }}
+def _html_a_texto_limpio(html: str) -> str:
+    """Convierte el resumen HTML en texto compacto para usarlo como contexto del chatbot."""
+    texto = re.sub(r"<br\s*/?>", "\n", str(html), flags=re.IGNORECASE)
+    texto = re.sub(r"</p>|</div>|</li>|</h\d>", "\n", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"<[^>]+>", "", texto)
+    texto = (
+        texto.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+    )
+    texto = re.sub(r"[ \t]+", " ", texto)
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return texto.strip()
 
-.robot-summary-button {{
+
+def _crear_contexto_chatbot_vales(
+    resumen_html: str,
+    df_contexto: pd.DataFrame | None,
+    nombre_valera: str,
+    fecha_sel: str,
+) -> str:
+    """Prepara un contexto ejecutivo y una tabla compacta sin alterar los cálculos del tablero."""
+    partes = [
+        f"Valera activa: {nombre_valera}",
+        f"Fecha de corte visible: {fecha_sel}",
+        "RESUMEN EJECUTIVO VISIBLE:",
+        _html_a_texto_limpio(resumen_html),
+    ]
+
+    if df_contexto is not None and not df_contexto.empty:
+        df_chat = df_contexto.copy()
+        columnas = [
+            "Subdirección", "Zona", "Sucursal", "Coordinacion",
+            "Calidad de Cartera", "Distribuidoras Totales",
+            "Distribuidoras al Corriente", "Distribuidoras en Mora",
+            "Var Dist Corriente", "Var Dist en Mora", "Total Dispersado",
+            "Canjes", "Canjes Fecha Corte", "Total Dispersado Fecha Corte",
+            "Canje Promedio Acumulado",
+        ]
+        columnas = [c for c in columnas if c in df_chat.columns]
+
+        if columnas:
+            for col in columnas:
+                if col not in ["Subdirección", "Zona", "Sucursal", "Coordinacion"]:
+                    df_chat[col] = pd.to_numeric(df_chat[col], errors="coerce").fillna(0)
+
+            agrupadores = [c for c in ["Subdirección", "Zona", "Sucursal"] if c in columnas]
+            numericas = [c for c in columnas if c not in agrupadores + ["Coordinacion"]]
+
+            if agrupadores:
+                reglas = {c: "sum" for c in numericas}
+                if "Calidad de Cartera" in reglas:
+                    reglas.pop("Calidad de Cartera")
+
+                tabla = df_chat.groupby(agrupadores, as_index=False).agg(reglas)
+
+                if {"Distribuidoras Totales", "Distribuidoras al Corriente"}.issubset(tabla.columns):
+                    tabla["Calidad de Cartera"] = tabla.apply(
+                        lambda r: (
+                            r["Distribuidoras al Corriente"]
+                            / r["Distribuidoras Totales"] * 100
+                        ) if r["Distribuidoras Totales"] else 0,
+                        axis=1,
+                    )
+
+                if "Distribuidoras en Mora" in tabla.columns:
+                    tabla = tabla.sort_values("Distribuidoras en Mora", ascending=False)
+                elif "Total Dispersado" in tabla.columns:
+                    tabla = tabla.sort_values("Total Dispersado", ascending=False)
+
+                tabla = tabla.head(120)
+                partes.extend([
+                    "DATOS OPERATIVOS DE LA SELECCIÓN ACTUAL:",
+                    tabla.to_csv(index=False),
+                ])
+
+    partes.extend([
+        "BASE DE INTERPRETACIÓN DEL NEGOCIO:",
+        cargar_documento_interpretacion_negocio(),
+    ])
+    return "\n\n".join(partes)
+
+
+def _obtener_respuesta_chatbot_vales(
+    pregunta: str,
+    contexto: str,
+    historial: list[dict],
+) -> str:
+    """Consulta el modelo configurado usando únicamente la información visible del tablero."""
+    if OpenAI is None:
+        return (
+            "No está instalada la librería openai. Ejecuta: "
+            "pip install openai"
+        )
+
+    api_key = ""
+    try:
+        api_key = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+    except Exception:
+        api_key = ""
+    api_key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+
+    if not api_key:
+        return (
+            "Falta configurar OPENAI_API_KEY en .streamlit/secrets.toml "
+            "o en los Secrets de Streamlit Cloud."
+        )
+
+    try:
+        modelo = str(st.secrets.get("OPENAI_MODEL", "gpt-5.4-mini"))
+    except Exception:
+        modelo = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+    instrucciones = """
+Eres el chatbot ejecutivo del tablero Valeras. Responde en español claro, fluido y orientado al negocio de vales.
+Usa exclusivamente el contexto proporcionado. No inventes cifras, causas ni sucursales.
+Cuando una respuesta no pueda determinarse con los datos, dilo expresamente.
+Prioriza hallazgos, comparaciones, riesgos, oportunidades y acciones concretas.
+Distingue siempre entre datos acumulados y datos del día de corte.
+Mantén la respuesta breve, salvo que el usuario solicite un análisis amplio.
+""".strip()
+
+    mensajes = [
+        {
+            "role": "developer",
+            "content": instrucciones + "\n\nCONTEXTO DEL TABLERO:\n" + contexto,
+        }
+    ]
+    for mensaje in historial[-8:]:
+        if mensaje.get("role") in {"user", "assistant"}:
+            mensajes.append({
+                "role": mensaje["role"],
+                "content": str(mensaje.get("content", "")),
+            })
+    mensajes.append({"role": "user", "content": pregunta})
+
+    try:
+        cliente = OpenAI(api_key=api_key)
+        respuesta = cliente.responses.create(
+            model=modelo,
+            input=mensajes,
+        )
+        texto = getattr(respuesta, "output_text", "")
+        return texto.strip() or "No pude generar una respuesta con el contexto actual."
+    except Exception as e:
+        return f"No pude consultar el chatbot: {e}"
+
+
+@st.dialog("Resumen completo de Vales", width="large")
+def _dialogo_resumen_con_chatbot(
+    resumen_html: str,
+    contexto_chatbot: str,
+    clave_chat: str,
+):
+    st.markdown(resumen_html, unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("### Pregúntale al tablero")
+    st.caption(
+        "El chatbot responde con la marca, corte, filtros y datos que están activos en esta vista."
+    )
+
+    historial_key = f"chat_vales_historial_{clave_chat}"
+    pregunta_key = f"chat_vales_pregunta_{clave_chat}"
+
+    if historial_key not in st.session_state:
+        st.session_state[historial_key] = []
+
+    for mensaje in st.session_state[historial_key]:
+        with st.chat_message(mensaje["role"]):
+            st.markdown(mensaje["content"])
+
+    pregunta = st.text_input(
+        "Pregunta",
+        placeholder="Ejemplo: ¿Qué sucursal requiere mayor atención y por qué?",
+        key=pregunta_key,
+        label_visibility="collapsed",
+    )
+
+    col_enviar, col_limpiar, _ = st.columns([1, 1, 4])
+    with col_enviar:
+        enviar = st.button("Preguntar", key=f"chat_vales_enviar_{clave_chat}", use_container_width=True)
+    with col_limpiar:
+        limpiar = st.button("Limpiar", key=f"chat_vales_limpiar_{clave_chat}", use_container_width=True)
+
+    if limpiar:
+        st.session_state[historial_key] = []
+        st.rerun()
+
+    if enviar and pregunta.strip():
+        historial_previo = list(st.session_state[historial_key])
+        st.session_state[historial_key].append({"role": "user", "content": pregunta.strip()})
+        with st.spinner("Analizando la información visible..."):
+            respuesta = _obtener_respuesta_chatbot_vales(
+                pregunta=pregunta.strip(),
+                contexto=contexto_chatbot,
+                historial=historial_previo,
+            )
+        st.session_state[historial_key].append({"role": "assistant", "content": respuesta})
+        st.rerun()
+
+
+def renderizar_robot_resumen_ejecutivo(
+    resumen_html: str,
+    df_contexto: pd.DataFrame | None = None,
+    nombre_valera: str = "Vales",
+    fecha_sel: str = "",
+) -> None:
+    """Conserva el botón del robot y abre el resumen con un chatbot integrado."""
+    clave_chat = re.sub(r"[^a-zA-Z0-9]+", "_", f"{nombre_valera}_{fecha_sel}").strip("_").lower()
+    contexto_chatbot = _crear_contexto_chatbot_vales(
+        resumen_html=resumen_html,
+        df_contexto=df_contexto,
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+    )
+
+    st.markdown(
+        """
+<style>
+.st-key-robot_resumen_ejecutivo {
     position: fixed;
     top: 34px;
     right: 190px;
     z-index: 100001;
+}
+.st-key-robot_resumen_ejecutivo button {
     width: 44px;
     height: 44px;
+    min-height: 44px;
+    padding: 0;
     border: 1px solid rgba(31, 43, 119, 0.35);
     border-radius: 11px;
     background: #ffffff;
     color: #1f2b77;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 23px;
-    cursor: pointer;
+    font-size: 22px;
     box-shadow: 0 8px 24px rgba(31, 43, 119, 0.18);
-    user-select: none;
-}}
-
-.robot-summary-button:hover {{
+}
+.st-key-robot_resumen_ejecutivo button:hover {
     transform: translateY(-1px);
+    border-color: rgba(31, 43, 119, 0.55);
     box-shadow: 0 10px 28px rgba(31, 43, 119, 0.24);
-}}
-
-.robot-summary-overlay {{
-    position: fixed;
-    inset: 0;
-    z-index: 100000;
-    display: none;
-    background: rgba(6, 16, 55, 0.22);
-}}
-
-.robot-summary-panel {{
-    position: fixed;
-    top: 92px;
-    right: 28px;
-    z-index: 100002;
-    width: min(760px, calc(100vw - 56px));
-    max-height: calc(100vh - 120px);
-    overflow-y: auto;
-    padding: 22px;
-    border: 1px solid rgba(31, 43, 119, 0.18);
-    border-left: 6px solid #1f2b77;
-    border-radius: 18px;
-    background: #ffffff;
-    box-shadow: 0 22px 60px rgba(13, 27, 84, 0.25);
-    display: none;
-}}
-
-.robot-summary-close {{
-    position: sticky;
-    top: 0;
-    float: right;
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: #1f2b77;
-    color: #ffffff;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 20px;
-    font-weight: 800;
-    margin: -6px -6px 8px 12px;
-}}
-
-#{robot_id}:checked ~ .robot-summary-overlay,
-#{robot_id}:checked ~ .robot-summary-panel {{ display: block; }}
-
-@media (max-width: 900px) {{
-    .robot-summary-button {{ right: 164px; top: 30px; }}
-    .robot-summary-panel {{ right: 14px; width: calc(100vw - 28px); }}
-}}
+}
+@media (max-width: 900px) {
+    .st-key-robot_resumen_ejecutivo { right: 164px; top: 30px; }
+}
 </style>
-
-<input class="robot-summary-toggle" type="checkbox" id="{robot_id}">
-<label class="robot-summary-button" for="{robot_id}" title="Ver resumen ejecutivo">🤖</label>
-<label class="robot-summary-overlay" for="{robot_id}"></label>
-<div class="robot-summary-panel">
-    <label class="robot-summary-close" for="{robot_id}" title="Cerrar">×</label>
-    {resumen_html}
-</div>
 """,
         unsafe_allow_html=True,
     )
 
+    if st.button(
+        "🤖",
+        key="robot_resumen_ejecutivo",
+        help="Ver resumen completo y consultar el chatbot",
+    ):
+        _dialogo_resumen_con_chatbot(
+            resumen_html=resumen_html,
+            contexto_chatbot=contexto_chatbot,
+            clave_chat=clave_chat,
+        )
 
 def obtener_corte_desde_base(df: pd.DataFrame | None, default: str = "") -> str:
     """
@@ -7772,7 +7943,12 @@ def mostrar_mapa(valera_param: str):
         conservar_tarjetas=bool(subdireccion_sel or estado_sel),
         devolver_html=True,
     )
-    renderizar_robot_resumen_ejecutivo(resumen_ejecutivo_html or "")
+    renderizar_robot_resumen_ejecutivo(
+        resumen_ejecutivo_html or "",
+        df_contexto=df_resumen_base,
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+    )
 
     detalle_estado_activo = bool(subdireccion_sel and (es_mexico or es_peru))
     elementos_estructura_actual = int(df_mapa_previo[nivel_vista].nunique()) if nivel_vista in df_mapa_previo.columns else 0
