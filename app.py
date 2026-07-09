@@ -41,6 +41,7 @@ ARCHIVO_GEOJSON_PE = BASE_DIR / "peru_departamentos.geojson"
 ARCHIVO_GEOJSON_MUN_MX = BASE_DIR / "mexico_municipios.geojson"
 ARCHIVO_INTERPRETACION_NEGOCIO = BASE_DIR / "interpretacion_negocio_vales.md"
 ARCHIVO_CLIENTES = BASE_DIR / "Clientes.csv"
+ARCHIVO_REGLAS_CHATBOT = BASE_DIR / "Catalogo_completo_reglas_chatbot_valeras.xlsx"
 
 
 # ======================================================
@@ -4868,6 +4869,208 @@ No uses Markdown ni encabezados fuera del div.
     return resultado
 
 
+
+@st.cache_data(show_spinner=False)
+def cargar_catalogo_reglas_chatbot(path: str) -> pd.DataFrame:
+    """
+    Lee la hoja 'Reglas Chatbot' del catálogo subido a GitHub.
+
+    El archivo esperado es:
+    Catalogo_completo_reglas_chatbot_valeras.xlsx
+    """
+    ruta = Path(path)
+    if not ruta.exists():
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_excel(ruta, sheet_name="Reglas Chatbot", header=2)
+    except Exception:
+        return pd.DataFrame()
+
+    columnas_esperadas = [
+        "Intención",
+        "Palabras clave",
+        "Base origen",
+        "Columnas usadas",
+        "Cálculo",
+        "Agrupación",
+        "Filtros",
+        "Orden",
+        "Formato",
+        "Plantilla de respuesta",
+        "Ejemplo de pregunta",
+        "Notas técnicas",
+    ]
+
+    for col in columnas_esperadas:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[columnas_esperadas].copy()
+    df = df.dropna(subset=["Intención"]).copy()
+
+    for col in columnas_esperadas:
+        df[col] = df[col].fillna("").astype(str).str.strip()
+
+    df = df[
+        ~df["Intención"].map(limpiar_texto).isin(
+            {"", "NAN", "INTENCION"}
+        )
+    ].copy()
+
+    return df.reset_index(drop=True)
+
+
+def obtener_regla_chatbot_por_intencion(
+    intencion: str,
+    catalogo: pd.DataFrame,
+) -> dict:
+    if catalogo is None or catalogo.empty:
+        return {}
+
+    coincidencia = catalogo[
+        catalogo["Intención"].map(limpiar_texto)
+        == limpiar_texto(intencion)
+    ]
+
+    if coincidencia.empty:
+        return {}
+
+    return coincidencia.iloc[0].to_dict()
+
+
+def _fragmentos_palabras_clave(valor: str) -> list[str]:
+    """Convierte la celda de palabras clave en frases normalizadas."""
+    if not valor:
+        return []
+
+    partes = re.split(r"[,;\n|]+", str(valor))
+    resultado = []
+
+    for parte in partes:
+        frase = limpiar_texto(parte)
+        if frase and frase not in resultado:
+            resultado.append(frase)
+
+    return resultado
+
+
+def detectar_intencion_desde_catalogo(
+    pregunta: str,
+    catalogo: pd.DataFrame,
+) -> tuple[str, dict, float]:
+    """
+    Detecta la intención usando la hoja de Excel.
+
+    Prioriza:
+    1. Coincidencia exacta de una frase completa.
+    2. Mayor número de palabras coincidentes.
+    3. Frases más largas y específicas.
+    """
+    if catalogo is None or catalogo.empty:
+        return "", {}, 0.0
+
+    pregunta_norm = limpiar_texto(pregunta)
+    palabras_pregunta = set(pregunta_norm.split())
+
+    mejor_intencion = ""
+    mejor_regla = {}
+    mejor_puntaje = 0.0
+
+    for _, fila in catalogo.iterrows():
+        frases = _fragmentos_palabras_clave(
+            fila.get("Palabras clave", "")
+        )
+
+        puntaje_fila = 0.0
+
+        for frase in frases:
+            palabras_frase = set(frase.split())
+            if not palabras_frase:
+                continue
+
+            if frase in pregunta_norm:
+                # Frase completa encontrada: gran prioridad.
+                puntaje = 100.0 + len(frase) / 10.0
+            else:
+                interseccion = palabras_frase & palabras_pregunta
+                cobertura = len(interseccion) / len(palabras_frase)
+                precision = (
+                    len(interseccion) / len(palabras_pregunta)
+                    if palabras_pregunta
+                    else 0
+                )
+
+                puntaje = cobertura * 55.0 + precision * 20.0
+
+                # Se exige al menos una coincidencia significativa.
+                if len(interseccion) == 1 and len(palabras_frase) > 2:
+                    puntaje *= 0.55
+
+            puntaje_fila = max(puntaje_fila, puntaje)
+
+        # También usa el ejemplo de pregunta como señal secundaria.
+        ejemplo = limpiar_texto(fila.get("Ejemplo de pregunta", ""))
+        if ejemplo:
+            ejemplo_palabras = set(ejemplo.split())
+            interseccion = ejemplo_palabras & palabras_pregunta
+            if interseccion:
+                puntaje_fila = max(
+                    puntaje_fila,
+                    len(interseccion) / len(ejemplo_palabras) * 35.0,
+                )
+
+        if puntaje_fila > mejor_puntaje:
+            mejor_puntaje = puntaje_fila
+            mejor_intencion = str(fila.get("Intención", "")).strip()
+            mejor_regla = fila.to_dict()
+
+    # Umbral conservador para evitar ejecutar una regla equivocada.
+    if mejor_puntaje < 24.0:
+        return "", {}, mejor_puntaje
+
+    return mejor_intencion, mejor_regla, mejor_puntaje
+
+
+def _rellenar_plantilla_catalogo(
+    plantilla: str,
+    valores: dict,
+) -> str:
+    if not plantilla:
+        return ""
+
+    respuesta = str(plantilla)
+
+    for clave, valor in valores.items():
+        respuesta = respuesta.replace(
+            "{" + str(clave) + "}",
+            str(valor),
+        )
+
+    # Quita marcadores no resueltos para no mostrarlos al usuario.
+    respuesta = re.sub(r"\{[^{}]+\}", "", respuesta)
+    respuesta = re.sub(r"\s+", " ", respuesta).strip()
+    return respuesta
+
+
+def _descripcion_regla_catalogo(regla: dict) -> str:
+    if not regla:
+        return ""
+
+    partes = []
+    for etiqueta, clave in [
+        ("Cálculo", "Cálculo"),
+        ("Agrupación", "Agrupación"),
+        ("Filtros", "Filtros"),
+        ("Orden", "Orden"),
+    ]:
+        valor = str(regla.get(clave, "")).strip()
+        if valor and limpiar_texto(valor) not in {"NAN", "—"}:
+            partes.append(f"**{etiqueta}:** {valor}")
+
+    return " · ".join(partes)
+
+
 def _numero_chatbot(df: pd.DataFrame, columna: str) -> pd.Series:
     if df is None or df.empty or columna not in df.columns:
         return pd.Series(dtype=float)
@@ -5155,6 +5358,17 @@ def _obtener_respuesta_chatbot_vales(
         return "No hay datos disponibles para responder dentro de la selección actual."
 
     pregunta_norm = limpiar_texto(pregunta)
+
+    catalogo_reglas = cargar_catalogo_reglas_chatbot(
+        str(ARCHIVO_REGLAS_CHATBOT)
+    )
+    intencion_catalogo, regla_catalogo, puntaje_catalogo = (
+        detectar_intencion_desde_catalogo(
+            pregunta=pregunta,
+            catalogo=catalogo_reglas,
+        )
+    )
+
     nivel = "Sucursal"
     if "SUBDIRECCION" in pregunta_norm:
         nivel = "Subdirección"
@@ -5169,20 +5383,102 @@ def _obtener_respuesta_chatbot_vales(
 
     # Ayuda y capacidades.
     if any(x in pregunta_norm for x in ["QUE PUEDES", "AYUDA", "PREGUNTAS", "OPCIONES"]):
+        if catalogo_reglas.empty:
+            return (
+                "Puedo responder preguntas locales sobre mora, calidad, distribuidoras, "
+                "dispersión, canjes, comparaciones, categorías y prioridad de atención. "
+                "No encontré el archivo Catalogo_completo_reglas_chatbot_valeras.xlsx, "
+                "por lo que estoy usando únicamente las reglas internas."
+            )
+
+        ejemplos = (
+            catalogo_reglas["Ejemplo de pregunta"]
+            .replace("", pd.NA)
+            .dropna()
+            .head(8)
+            .tolist()
+        )
+        lista = "\n".join(f"- {ejemplo}" for ejemplo in ejemplos)
+
         return (
-            "Puedo responder, sin API, preguntas sobre: mayor o menor mora, mejor o peor "
-            "calidad de cartera, distribuidoras totales o al corriente, dispersión, canjes, "
-            "canje promedio, variaciones, prioridad de atención, comparación entre dos "
-            "sucursales/zonas/subdirecciones y categoría por monto colocado."
+            f"Estoy usando **{len(catalogo_reglas):,} reglas** del archivo "
+            "`Catalogo_completo_reglas_chatbot_valeras.xlsx`. "
+            "Puedo identificar intenciones, palabras clave, agrupación, cálculo, "
+            "orden y plantilla de respuesta. Algunos ejemplos son:\n"
+            + lista
         )
 
     # Categorías.
-    if any(x in pregunta_norm for x in ["CATEGORIA", "BRONCE", "PLATA", "ORO", "PLATINO", "DIAMANTE", "EMBAJADOR"]):
+    if intencion_catalogo in {
+        "categoria_por_colocado",
+        "categoria_distribuidora",
+    } or any(
+        x in pregunta_norm
+        for x in [
+            "CATEGORIA", "BRONCE", "PLATA", "ORO",
+            "PLATINO", "DIAMANTE", "EMBAJADOR",
+        ]
+    ):
         return _respuesta_categoria_local(pregunta)
 
     # Comparaciones.
-    if any(x in pregunta_norm for x in ["COMPARA", "COMPARACION", "CONTRA", "VERSUS", " VS "]):
+    if intencion_catalogo == "comparar_entidades" or any(
+        x in pregunta_norm
+        for x in ["COMPARA", "COMPARACION", "CONTRA", "VERSUS", " VS "]
+    ):
         return _respuesta_comparacion_local(tabla, nivel, nombres)
+
+    # Conteos de estructura definidos en el catálogo.
+    if intencion_catalogo in {
+        "conteo_subdirecciones",
+        "conteo_zonas",
+        "conteo_sucursales",
+        "conteo_coordinaciones",
+    }:
+        mapa_columnas = {
+            "conteo_subdirecciones": "Subdirección",
+            "conteo_zonas": "Zona",
+            "conteo_sucursales": "Sucursal",
+            "conteo_coordinaciones": "Coordinacion",
+        }
+        columna = mapa_columnas[intencion_catalogo]
+
+        if columna not in df_contexto.columns:
+            return (
+                f"La regla `{intencion_catalogo}` fue identificada desde el catálogo, "
+                f"pero la columna **{columna}** no está disponible en el alcance actual."
+            )
+
+        valor = (
+            df_contexto[columna]
+            .dropna()
+            .astype(str)
+            .map(limpiar_texto)
+        )
+        valor = valor[
+            ~valor.isin({"", "SIN DATO", "POR ASIGNAR", "SIN ASIGNAR"})
+        ].nunique()
+
+        plantilla = str(
+            regla_catalogo.get("Plantilla de respuesta", "")
+        )
+        respuesta_catalogo = _rellenar_plantilla_catalogo(
+            plantilla,
+            {"Valor": f"{valor:,}"},
+        )
+
+        return respuesta_catalogo or (
+            f"El alcance actual contiene **{valor:,}** valores únicos de "
+            f"**{columna}**."
+        )
+
+    # Definiciones del negocio incluidas en el catálogo.
+    if intencion_catalogo.startswith("def_"):
+        plantilla = str(
+            regla_catalogo.get("Plantilla de respuesta", "")
+        ).strip()
+        if plantilla:
+            return plantilla
 
     # Pregunta sobre un elemento concreto.
     if nombres:
@@ -5201,12 +5497,23 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Atención / riesgo.
-    if any(x in pregunta_norm for x in ["ATENCION", "RIESGO", "PRIORIDAD", "PREOCUPA", "CRITIC"]):
+    if intencion_catalogo == "requiere_atencion" or any(
+        x in pregunta_norm
+        for x in ["ATENCION", "RIESGO", "PRIORIDAD", "PREOCUPA", "CRITIC"]
+    ):
         fila = _fila_chatbot(tabla, "Puntaje de Atención", mayor=True)
         return _explicar_prioridad_local(fila, nivel) if fila is not None else "No pude calcular la prioridad."
 
     # Mora.
-    if "MORA" in pregunta_norm or "ATRASO" in pregunta_norm:
+    if intencion_catalogo in {
+        "mayor_mora_distribuidoras",
+        "menor_mora_distribuidoras",
+        "mayor_monto_mora",
+        "menor_monto_mora",
+        "porcentaje_mora",
+        "mayor_aumento_mora",
+        "mayor_reduccion_mora",
+    } or "MORA" in pregunta_norm or "ATRASO" in pregunta_norm:
         menor = any(x in pregunta_norm for x in ["MENOR", "MENOS", "MEJOR", "BAJA"])
         columna = "Distribuidoras en Mora"
         fila = _fila_chatbot(tabla, columna, mayor=not menor)
@@ -5220,7 +5527,11 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Calidad de cartera.
-    if "CALIDAD" in pregunta_norm or "CARTERA SANA" in pregunta_norm:
+    if intencion_catalogo in {
+        "mejor_calidad",
+        "peor_calidad",
+        "calidad_especifica",
+    } or "CALIDAD" in pregunta_norm or "CARTERA SANA" in pregunta_norm:
         peor = any(x in pregunta_norm for x in ["PEOR", "MENOR", "BAJA", "MAS MALA"])
         fila = _fila_chatbot(tabla, "Calidad de Cartera", mayor=not peor)
         if fila is None:
@@ -5234,7 +5545,15 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Dispersión.
-    if any(x in pregunta_norm for x in ["DISPERSION", "DISPERSADO", "COLOCADO"]):
+    if intencion_catalogo in {
+        "mayor_dispersion_acumulada",
+        "menor_dispersion_acumulada",
+        "dispersion_dia_corte",
+        "mayor_dispersion",
+    } or any(
+        x in pregunta_norm
+        for x in ["DISPERSION", "DISPERSADO", "COLOCADO"]
+    ):
         menor = any(x in pregunta_norm for x in ["MENOR", "MENOS", "BAJA"])
         columna = (
             "Total Dispersado Fecha Corte"
@@ -5252,7 +5571,14 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Canjes.
-    if "CANJE" in pregunta_norm:
+    if intencion_catalogo in {
+        "mayor_canjes_acumulados",
+        "menor_canjes_acumulados",
+        "canjes_dia_corte",
+        "canje_promedio",
+        "mayor_canje_promedio",
+        "menor_canje_promedio",
+    } or "CANJE" in pregunta_norm:
         if "PROMEDIO" in pregunta_norm:
             columna = "Canje Promedio"
         elif any(x in pregunta_norm for x in ["DIA", "CORTE", "HOY"]) and "Canjes Fecha Corte" in tabla.columns:
@@ -5273,7 +5599,12 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Distribuidoras.
-    if "DISTRIBUIDORA" in pregunta_norm:
+    if intencion_catalogo in {
+        "mayor_distribuidoras_totales",
+        "menor_distribuidoras_totales",
+        "mayor_distribuidoras_corriente",
+        "menor_distribuidoras_corriente",
+    } or "DISTRIBUIDORA" in pregunta_norm:
         if "CORRIENTE" in pregunta_norm:
             columna = "Distribuidoras al Corriente"
         else:
@@ -5289,7 +5620,10 @@ def _obtener_respuesta_chatbot_vales(
         )
 
     # Totales del alcance.
-    if any(x in pregunta_norm for x in ["TOTAL", "RESUMEN", "PANORAMA", "COMO ESTA"]):
+    if intencion_catalogo == "resumen_general" or any(
+        x in pregunta_norm
+        for x in ["TOTAL", "RESUMEN", "PANORAMA", "COMO ESTA"]
+    ):
         totales = {
             "totales": _numero_chatbot(df_contexto, "Distribuidoras Totales").sum(),
             "corriente": _numero_chatbot(df_contexto, "Distribuidoras al Corriente").sum(),
@@ -5312,8 +5646,28 @@ def _obtener_respuesta_chatbot_vales(
             f"con **{_formato_chat_numero(totales['canjes'])}** canjes."
         )
 
+    if intencion_catalogo:
+        detalle = _descripcion_regla_catalogo(regla_catalogo)
+        return (
+            f"Identifiqué la intención **{intencion_catalogo}** desde el catálogo, "
+            "pero esa operación todavía no tiene un ejecutor específico dentro del script. "
+            f"{detalle}. Puedes agregar su cálculo al intérprete sin modificar el Excel."
+        )
+
+    if catalogo_reglas.empty:
+        estado_catalogo = (
+            "No encontré `Catalogo_completo_reglas_chatbot_valeras.xlsx` "
+            "en la carpeta del proyecto."
+        )
+    else:
+        estado_catalogo = (
+            f"Revisé {len(catalogo_reglas):,} reglas del catálogo, "
+            f"pero ninguna superó el umbral de coincidencia."
+        )
+
     return (
-        "No reconocí esa pregunta dentro de mis reglas locales. Puedes preguntar, por ejemplo: "
+        estado_catalogo
+        + " Puedes preguntar, por ejemplo: "
         "**¿Qué sucursal requiere mayor atención?**, **¿Cuál tiene mayor mora?**, "
         "**¿Cuál tiene mejor calidad?**, **¿Dónde hay mayor dispersión?**, "
         "**¿Quién tiene más canjes?**, **Compara Cd. Juárez con Tampico Centro**, "
@@ -5387,6 +5741,7 @@ def _dialogo_resumen_con_chatbot(
     st.markdown(
         '<div class="ayuda-chat-robot">'
         'La conversación se desplaza dentro del recuadro. '
+        'El chatbot consulta el catálogo de reglas de Excel y calcula con las bases. '
         'Escribe cada nueva pregunta en la caja inferior.'
         '</div>',
         unsafe_allow_html=True,
