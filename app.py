@@ -5338,7 +5338,15 @@ def _dialogo_resumen_con_chatbot(
         """
         <style>
         div[data-testid="stDialog"] div[role="dialog"] {
-            max-height: 92vh;
+            height: min(88vh, 820px);
+            max-height: 88vh;
+            overflow: hidden !important;
+        }
+
+        div[data-testid="stDialog"] div[role="dialog"] > div {
+            height: 100%;
+            max-height: 100%;
+            overflow: hidden !important;
         }
 
         .resumen-robot-fijo {
@@ -5346,6 +5354,10 @@ def _dialogo_resumen_con_chatbot(
             position: relative;
             z-index: 2;
             padding-bottom: 4px;
+            max-height: 31vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
         }
 
         .titulo-chat-robot {
@@ -5390,12 +5402,27 @@ def _dialogo_resumen_con_chatbot(
     # la pregunta para que usuario y respuesta aparezcan en el orden correcto.
     chat_placeholder = st.empty()
 
-    pregunta = st.text_input(
-        "Nueva pregunta",
-        placeholder="Escribe aquí otra pregunta para continuar el chat…",
-        key=pregunta_key,
-        label_visibility="collapsed",
+    st.markdown(
+        """
+        <style>
+        .st-key-chat_vales_composer {
+            position: relative;
+            z-index: 5;
+            background: #ffffff;
+            padding-top: 4px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
+
+    with st.container(key="chat_vales_composer"):
+        pregunta = st.text_input(
+            "Nueva pregunta",
+            placeholder="Escribe aquí otra pregunta para continuar el chat…",
+            key=pregunta_key,
+            label_visibility="collapsed",
+        )
 
     col_enviar, col_limpiar, _ = st.columns([1, 1, 4])
     with col_enviar:
@@ -5435,9 +5462,29 @@ def _dialogo_resumen_con_chatbot(
             {"role": "assistant", "content": respuesta}
         )
 
+        # Evita que el navegador desplace la página principal después del submit.
+        try:
+            import streamlit.components.v1 as components
+            components.html(
+                """
+                <script>
+                const doc = window.parent.document;
+                const dialog = doc.querySelector('div[data-testid="stDialog"] div[role="dialog"]');
+                if (dialog) {
+                    dialog.scrollTop = 0;
+                }
+                window.parent.scrollTo({top: 0, behavior: 'instant'});
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+        except Exception:
+            pass
+
     # Únicamente esta sección tiene scroll. El resumen y la caja para escribir
     # permanecen fuera del área desplazable.
-    with chat_placeholder.container(height=360, border=True):
+    with chat_placeholder.container(height=260, border=True):
         if not st.session_state[historial_key]:
             st.caption(
                 "Todavía no hay preguntas. Puedes comenzar, por ejemplo, con: "
