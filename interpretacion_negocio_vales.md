@@ -74,9 +74,66 @@ La línea de crédito revolvente se libera conforme el cliente paga capital. Est
 
 ## 5. Categorías de distribuidora
 
-Las categorías Bronce, Plata, Oro, Platino, Diamante y Embajadoras representan rangos de colocado y niveles de bonificación. A mayor categoría, mayor capacidad de colocación y mayor bonificación potencial, especialmente cuando el pago se realiza en días preferentes.
+Las categorías Bronce, Plata, Oro, Platino, Diamante y Embajadoras se asignan con base en el monto colocado por la distribuidora. La categoría permite identificar su nivel de desarrollo comercial, capacidad de colocación y bonificación potencial.
 
-Una base concentrada en Bronce o Plata puede indicar oportunidad de crecimiento y desarrollo. Una base concentrada en Platino, Diamante o Embajadoras indica mayor capacidad comercial, pero también mayor exposición si la cartera se deteriora.
+La clasificación debe realizarse considerando dos elementos:
+
+1. La zona operativa aplicable a la distribuidora.
+2. El monto colocado acumulado que presenta en el corte analizado.
+
+Los rangos de colocación son los mismos para Zona 1 y Zona 2:
+
+| Categoría | Rango de colocado |
+|---|---:|
+| Bronce | $40,000 o menos |
+| Plata | $40,001 a $60,000 |
+| Oro | $60,001 a $100,000 |
+| Platino | $100,001 a $150,000 |
+| Diamante | $150,001 a $220,000 |
+| Embajadoras | $220,001 a $500,000 |
+
+La categoría debe identificarse por el rango en el que se encuentre el colocado de la distribuidora. Por ejemplo, una distribuidora con $85,000 colocados pertenece a Oro; una con $145,000 pertenece a Platino; y una con $250,000 pertenece a Embajadoras.
+
+La categoría representa capacidad comercial, pero no debe interpretarse de forma aislada. Una distribuidora de categoría alta con buena calidad de cartera y pagos puntuales es una fortaleza comercial. Una distribuidora de categoría alta con mora o deterioro representa una exposición relevante, porque concentra mayor saldo colocado. Una distribuidora Bronce o Plata con buena calidad puede ser candidata a desarrollo y crecimiento de línea.
+
+### Bonificaciones por categoría — Zona 1
+
+| Momento de pago | Bronce | Plata | Oro | Platino | Diamante | Embajadoras |
+|---|---:|---:|---:|---:|---:|---:|
+| Omega 1 | 15% | 16% | 17% | 19% | 20% | 21% |
+| Omega 2 | 14% | 15% | 16% | 18% | 18% | 21% |
+| Día 1 | 13% | 14% | 15% | 17% | 17% | 20% |
+| Día 2 | 12% | 13% | 14% | 15% | 16% | 19% |
+| Día 3 | 11% | 12% | 13% | 15% | 16% | 16% |
+| Día 4 | 10% | 10% | 11% | 14% | 15% | 15% |
+| Día 5 | 6% | 7% | 8% | 10% | 10% | 10% |
+
+### Bonificaciones por categoría — Zona 2
+
+| Momento de pago | Bronce | Plata | Oro | Platino | Diamante | Embajadoras |
+|---|---:|---:|---:|---:|---:|---:|
+| Omega 1 | 15% | 16% | 16% | 17% | 20% | 21% |
+| Omega 2 | 13.5% | 14.5% | 15.5% | 16.5% | 17.5% | 21% |
+| Día 1 | 13% | 14% | 15% | 16% | 17% | 20% |
+| Día 2 | 12% | 13% | 14% | 15% | 16% | 19% |
+| Día 3 | 10% | 11% | 11% | 13% | 15% | 15% |
+| Día 4 | 9% | 9% | 10% | 11% | 12% | 12% |
+| Día 5 | 6% | 7% | 7% | 7% | 7% | 7% |
+
+La bonificación depende de la combinación entre categoría, zona y momento de pago. Los pagos en Omega 1 y Omega 2 generan los mayores incentivos; conforme transcurren los días, la bonificación disminuye. Por ello, la lectura ejecutiva debe distinguir entre capacidad de colocación y disciplina de pago.
+
+### Reglas para identificar y evaluar distribuidoras
+
+- Categoría comercial: se determina exclusivamente por el rango de colocado.
+- Bonificación potencial: se determina por categoría, zona y día de pago.
+- Distribuidora fuerte: categoría media o alta, buena calidad de cartera, sin mora relevante y pago en Omega o primeros días.
+- Distribuidora con oportunidad: categoría Bronce o Plata, buena calidad y capacidad disponible para crecer.
+- Distribuidora en riesgo: categoría alta con mora, caída en distribuidoras al corriente o deterioro de calidad.
+- Distribuidora a contener: presenta baja calidad, mora creciente o pagos tardíos, aunque conserve colocación alta.
+- Distribuidora a desarrollar: mantiene buen comportamiento de pago y calidad, pero todavía se encuentra en una categoría baja o media.
+
+La IA debe evitar concluir que una categoría alta es positiva por sí sola. El análisis correcto debe combinar colocado, categoría, calidad de cartera, mora, comportamiento de pago y bonificación.
+
 
 ## 6. Pagos, bonificaciones y caída
 
@@ -148,4 +205,8 @@ En plazo y composición, capital es monto prestado, interés es ingreso financie
 
 [BLOQUE:HERRAMIENTAS]
 Las herramientas como quebranto, consideración, reestructura o robo son mecanismos de regularización y recuperación. No deben leerse como crecimiento comercial normal; sirven para contener deterioro, ordenar pagos y recuperar saldo.
+[/BLOQUE]
+
+[BLOQUE:CATEGORIAS_DISTRIBUIDORA]
+La categoría se determina por el monto colocado: Bronce hasta $40,000; Plata de $40,001 a $60,000; Oro de $60,001 a $100,000; Platino de $100,001 a $150,000; Diamante de $150,001 a $220,000; y Embajadoras de $220,001 a $500,000. La bonificación depende además de la zona y del momento de pago. Una categoría alta indica mayor capacidad comercial, pero también mayor exposición si existe mora o deterioro. Una categoría baja con buena calidad puede representar oportunidad de desarrollo. La IA debe combinar categoría, colocado, calidad, mora, día de pago y bonificación antes de emitir una conclusión.
 [/BLOQUE]
