@@ -3,6 +3,7 @@ import json
 import re
 import unicodedata
 import urllib.request
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pandas as pd
@@ -5172,16 +5173,61 @@ def _agrupar_chatbot_local(
     return resultado
 
 
+def _normalizar_entidad_chatbot(valor: str) -> str:
+    """
+    Normaliza nombres territoriales para reconocer variantes como:
+    Ciudad Juárez = Cd. Juárez = CD JUAREZ.
+    """
+    texto = limpiar_texto(valor)
+    texto = texto.replace(".", " ")
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    reemplazos = {
+        "CIUDAD JUAREZ": "CD JUAREZ",
+        "CD JUAREZ": "CD JUAREZ",
+        "CIUDAD VALLES": "CD VALLES",
+        "CD VALLES": "CD VALLES",
+        "CIUDAD VICTORIA": "CD VICTORIA",
+        "CD VICTORIA": "CD VICTORIA",
+        "CIUDAD MANTE": "CD MANTE",
+        "CD MANTE": "CD MANTE",
+        "CIUDAD CONSTITUCION": "CD CONSTITUCION",
+        "CD CONSTITUCION": "CD CONSTITUCION",
+    }
+
+    return reemplazos.get(texto, texto)
+
+
+def _variantes_entidad_chatbot(valor: str) -> set[str]:
+    base = _normalizar_entidad_chatbot(valor)
+    variantes = {base}
+
+    if base.startswith("CD "):
+        resto = base[3:].strip()
+        variantes.add(f"CIUDAD {resto}")
+        variantes.add(f"CD {resto}")
+
+    if base.startswith("CIUDAD "):
+        resto = base[7:].strip()
+        variantes.add(f"CD {resto}")
+        variantes.add(f"CIUDAD {resto}")
+
+    return {v for v in variantes if v}
+
+
 def _buscar_entidades_en_pregunta(
     pregunta: str,
     df: pd.DataFrame,
     columna: str,
 ) -> list[str]:
+    """
+    Encuentra hasta dos entidades dentro de la pregunta usando alias y similitud.
+    """
     if df is None or df.empty or columna not in df.columns:
         return []
 
-    pregunta_norm = limpiar_texto(pregunta)
-    coincidencias = []
+    pregunta_norm = _normalizar_entidad_chatbot(pregunta)
+    tokens_pregunta = set(pregunta_norm.split())
 
     valores = (
         df[columna]
@@ -5192,13 +5238,51 @@ def _buscar_entidades_en_pregunta(
         .tolist()
     )
 
-    # Primero nombres largos para evitar que "JUAREZ" capture antes que "CD JUAREZ".
-    for valor in sorted(valores, key=lambda x: len(str(x)), reverse=True):
-        valor_norm = limpiar_texto(valor)
-        if valor_norm and valor_norm in pregunta_norm:
-            coincidencias.append(valor)
+    candidatos = []
 
-    return coincidencias[:2]
+    for valor in valores:
+        variantes = _variantes_entidad_chatbot(valor)
+        mejor = 0.0
+
+        for variante in variantes:
+            if variante in pregunta_norm:
+                mejor = max(mejor, 1000 + len(variante))
+                continue
+
+            tokens_variante = set(variante.split())
+            if tokens_variante:
+                cobertura = len(tokens_variante & tokens_pregunta) / len(tokens_variante)
+                if cobertura == 1:
+                    mejor = max(mejor, 500 + len(tokens_variante))
+                elif cobertura >= 0.66:
+                    mejor = max(mejor, 200 + cobertura * 100)
+
+            similitud = SequenceMatcher(
+                None,
+                variante,
+                pregunta_norm,
+            ).ratio()
+            mejor = max(mejor, similitud * 100)
+
+        if mejor >= 70:
+            candidatos.append(
+                (mejor, len(_normalizar_entidad_chatbot(valor)), valor)
+            )
+
+    candidatos.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    resultado = []
+    vistos = set()
+
+    for _, _, valor in candidatos:
+        clave = _normalizar_entidad_chatbot(valor)
+        if clave not in vistos:
+            resultado.append(valor)
+            vistos.add(clave)
+        if len(resultado) == 2:
+            break
+
+    return resultado
 
 
 def _formato_chat_moneda(valor: float) -> str:
@@ -5303,22 +5387,26 @@ def _respuesta_comparacion_local(
     nombres: list[str],
 ) -> str:
     if len(nombres) < 2:
+        detectados = ", ".join(nombres) if nombres else "ninguno"
         return (
-            "Para comparar escribe dos nombres completos, por ejemplo: "
-            "**Compara Cd. Juárez con Tampico Centro**."
+            "No pude identificar dos entidades válidas dentro de los filtros activos. "
+            f"Detecté: **{detectados}**. "
+            "Puedes escribir, por ejemplo: **Compara Ciudad Valles con Ciudad Juárez**."
         )
 
-    seleccion = tabla[
-        tabla[nivel].astype(str).map(limpiar_texto).isin(
-            {limpiar_texto(n) for n in nombres[:2]}
-        )
-    ].copy()
+    filas = []
+    for nombre in nombres[:2]:
+        coincidencia = tabla[
+            tabla[nivel].astype(str).map(_normalizar_entidad_chatbot)
+            == _normalizar_entidad_chatbot(nombre)
+        ]
+        if not coincidencia.empty:
+            filas.append(coincidencia.iloc[0])
 
-    if len(seleccion) < 2:
+    if len(filas) < 2:
         return "No encontré ambos elementos dentro de los filtros activos."
 
-    a = seleccion.iloc[0]
-    b = seleccion.iloc[1]
+    a, b = filas[0], filas[1]
 
     def dato(fila, col):
         return float(fila.get(col, 0))
