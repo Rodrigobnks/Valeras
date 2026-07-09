@@ -5484,7 +5484,7 @@ def _dialogo_resumen_con_chatbot(
 
     # Únicamente esta sección tiene scroll. El resumen y la caja para escribir
     # permanecen fuera del área desplazable.
-    with chat_placeholder.container(height=260, border=True):
+    with chat_placeholder.container(height=156, border=True):
         if not st.session_state[historial_key]:
             st.caption(
                 "Todavía no hay preguntas. Puedes comenzar, por ejemplo, con: "
