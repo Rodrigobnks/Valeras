@@ -5043,9 +5043,29 @@ def renderizar_robot_resumen_ejecutivo(
         key="robot_resumen_ejecutivo",
         help="Ver resumen completo y consultar el chatbot",
     ):
+        # La API se consulta únicamente al abrir el icono del robot.
+        resumen_robot_html = _generar_comentario_ia_html(
+            tipo_comentario="resumen completo ejecutivo de Vales",
+            comentario_base_html=resumen_html or "",
+            contexto=contexto_chatbot,
+            instrucciones_adicionales=(
+                "Integra cartera, mora, variaciones, dispersión, canjes, "
+                "categorías, plazo y composición, tipos de desembolso y focos "
+                "territoriales. Incluye diagnóstico, atención requerida, "
+                "oportunidades y prioridades operativas. Usa información "
+                "visible y no visible de las bases, respetando los filtros."
+            ),
+        )
+
+        contexto_dialogo = (
+            contexto_chatbot
+            + "\n\nRESUMEN EJECUTIVO DEL ROBOT:\n"
+            + _html_a_texto_limpio(resumen_robot_html)
+        )
+
         _dialogo_resumen_con_chatbot(
-            resumen_html=resumen_html,
-            contexto_chatbot=contexto_chatbot,
+            resumen_html=resumen_robot_html,
+            contexto_chatbot=contexto_dialogo,
             clave_chat=clave_chat,
         )
 
@@ -5228,17 +5248,7 @@ def construir_comentario_ia_mapa(
 
 
 def mostrar_comentario_ia_mapa(*args, **kwargs):
-    html_base = construir_comentario_ia_mapa(*args, **kwargs)
-    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
-    html = _generar_comentario_ia_html(
-        tipo_comentario="comentario del mapa operativo",
-        comentario_base_html=html_base,
-        contexto=contexto,
-        instrucciones_adicionales=(
-            "Interpreta el mapa y sus filtros activos. Señala concentración, "
-            "calidad, mora, variaciones y actividad comercial relevante."
-        ),
-    ) if contexto else html_base
+    html = construir_comentario_ia_mapa(*args, **kwargs)
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -5330,17 +5340,7 @@ def construir_comentario_ia_mapa_plazo_composicion(
 
 
 def mostrar_comentario_ia_mapa_plazo_composicion(*args, **kwargs):
-    html_base = construir_comentario_ia_mapa_plazo_composicion(*args, **kwargs)
-    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
-    html = _generar_comentario_ia_html(
-        tipo_comentario="comentario de plazo y composición",
-        comentario_base_html=html_base,
-        contexto=contexto,
-        instrucciones_adicionales=(
-            "Relaciona capital, interés, total, vales, tasa de ganancia, plazo, "
-            "categorías, calidad de cartera y riesgo operativo."
-        ),
-    ) if contexto else html_base
+    html = construir_comentario_ia_mapa_plazo_composicion(*args, **kwargs)
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -5416,21 +5416,12 @@ def construir_comentario_ia_tabla_resumen(
 
 
 def mostrar_comentario_ia_tabla_resumen(*args, **kwargs):
-    html_base = construir_comentario_ia_tabla_resumen(*args, **kwargs)
-    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
-    html = _generar_comentario_ia_html(
-        tipo_comentario="comentario de la tabla de resumen",
-        comentario_base_html=html_base,
-        contexto=contexto,
-        instrucciones_adicionales=(
-            "Respeta Todos, Top 10, Bottom 10, nivel, orden y búsqueda activos. "
-            "Aclara cuándo el comentario se refiere sólo a filas visibles y "
-            "complementa con hallazgos de las bases no visibles."
-        ),
-    ) if contexto else html_base
+    html = construir_comentario_ia_tabla_resumen(*args, **kwargs)
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
+# ======================================================
+# DIVISIÓN POLÍTICA EXACTA POR SUBDIRECCIÓN
 # ======================================================
 # DIVISIÓN POLÍTICA EXACTA POR SUBDIRECCIÓN
 # ======================================================
@@ -8332,7 +8323,7 @@ def mostrar_mapa(valera_param: str):
     )
     st.session_state["_contexto_integral_ia_vales"] = contexto_integral_ia
 
-    resumen_ejecutivo_base_html = mostrar_comentarios_ia(
+    resumen_ejecutivo_html = mostrar_comentarios_ia(
         df_resumen_base=df_resumen_base,
         df_mapa=df_mapa_previo,
         resumen_pais=pd.DataFrame(),
@@ -8346,18 +8337,8 @@ def mostrar_mapa(valera_param: str):
         devolver_html=True,
     )
 
-    resumen_ejecutivo_html = _generar_comentario_ia_html(
-        tipo_comentario="resumen completo ejecutivo de Vales",
-        comentario_base_html=resumen_ejecutivo_base_html or "",
-        contexto=contexto_integral_ia,
-        instrucciones_adicionales=(
-            "El resumen debe integrar cartera, mora, variaciones, dispersión, "
-            "canjes, categorías, plazo y composición, tipos de desembolso y "
-            "focos territoriales. Incluye diagnóstico, atención requerida, "
-            "oportunidades y prioridades operativas. No te limites a lo visible."
-        ),
-    )
-
+    # Este resumen local se muestra únicamente como base.
+    # La versión con IA se genera sólo cuando el usuario pulsa el robot.
     renderizar_robot_resumen_ejecutivo(
         resumen_ejecutivo_html or "",
         df_contexto=df_resumen_base,
