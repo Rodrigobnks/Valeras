@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import re
@@ -4440,126 +4441,359 @@ def _html_a_texto_limpio(html: str) -> str:
     return texto.strip()
 
 
-def _crear_contexto_chatbot_vales(
-    resumen_html: str,
+
+def _obtener_configuracion_openai_vales() -> tuple[str, str]:
+    """Obtiene la clave y el modelo sin exponerlos en el código."""
+    api_key = ""
+    modelo = "gpt-4.1-mini"
+
+    try:
+        api_key = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+        modelo = str(st.secrets.get("OPENAI_MODEL", modelo)).strip() or modelo
+    except Exception:
+        pass
+
+    api_key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+    modelo = os.getenv("OPENAI_MODEL", modelo).strip() or modelo
+    return api_key, modelo
+
+
+def _alias_marcas_ia(nombre_valera: str) -> set[str]:
+    marca = limpiar_texto(nombre_valera)
+    alias = {
+        limpiar_texto("Vale Amigo"): {
+            limpiar_texto("Vale Amigo"),
+        },
+        limpiar_texto("Viva Vale"): {
+            limpiar_texto("Viva Vale"),
+        },
+        limpiar_texto("Rapivale"): {
+            limpiar_texto("Rapivale"),
+            limpiar_texto("RapiVale"),
+        },
+        limpiar_texto("Vale Amigo Perú"): {
+            limpiar_texto("Vale Amigo Perú"),
+            limpiar_texto("Vale Amigo Peru"),
+            limpiar_texto("Vale Perú"),
+            limpiar_texto("Vale Peru"),
+            limpiar_texto("Vale Amigo"),
+        },
+    }
+    return alias.get(marca, {marca})
+
+
+def _aplicar_alcance_ia(
+    df: pd.DataFrame,
+    df_contexto: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """
+    Aplica a una base no visible el mismo alcance territorial de la vista:
+    Subdirección, Zona y Sucursal. No exige que todas las columnas existan.
+    """
+    if df is None or df.empty or df_contexto is None or df_contexto.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+    resultado = df.copy()
+
+    for col in ["Subdirección", "Zona", "Sucursal"]:
+        if col not in resultado.columns or col not in df_contexto.columns:
+            continue
+
+        valores = {
+            limpiar_texto(v)
+            for v in df_contexto[col].dropna().astype(str).tolist()
+            if limpiar_texto(v)
+        }
+        if valores:
+            resultado = resultado[
+                resultado[col].map(limpiar_texto).isin(valores)
+            ].copy()
+
+    return resultado
+
+
+def _filtrar_marca_fecha_ia(
+    df: pd.DataFrame,
+    nombre_valera: str,
+    fecha_sel: str,
+) -> pd.DataFrame:
+    """Filtra una base por marca y por el corte visible, cuando esas columnas existen."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    resultado = df.copy()
+    marcas_validas = _alias_marcas_ia(nombre_valera)
+
+    if "Marca" in resultado.columns:
+        resultado = resultado[
+            resultado["Marca"].map(limpiar_texto).isin(marcas_validas)
+        ].copy()
+
+    fecha_objetivo = pd.to_datetime(fecha_sel, errors="coerce", dayfirst=True)
+    if pd.isna(fecha_objetivo):
+        return resultado
+
+    # Para acumulados se conservan registros hasta el corte.
+    for col in ["Date", "Fecha de Corte", "Corte Fecha"]:
+        if col in resultado.columns:
+            fechas = pd.to_datetime(resultado[col], errors="coerce", dayfirst=True)
+            resultado = resultado[
+                fechas.notna() & (fechas.dt.normalize() <= fecha_objetivo.normalize())
+            ].copy()
+            return resultado
+
+    # Algunas bases traen Corte como fecha y otras como texto.
+    if "Corte" in resultado.columns:
+        fechas = pd.to_datetime(resultado["Corte"], errors="coerce", dayfirst=True)
+        if fechas.notna().any():
+            resultado = resultado[
+                fechas.notna() & (fechas.dt.normalize() <= fecha_objetivo.normalize())
+            ].copy()
+
+    return resultado
+
+
+def _resumir_base_para_ia(
+    df: pd.DataFrame,
+    nombre_base: str,
+    max_filas: int = 250,
+) -> str:
+    """
+    Convierte una base en un resumen analizable.
+    Incluye totales y detalle agregado; evita enviar miles de filas crudas.
+    """
+    if df is None or df.empty:
+        return f"{nombre_base}: sin registros para el alcance actual."
+
+    tabla = df.copy()
+    columnas_auxiliares = [
+        c for c in tabla.columns
+        if str(c).startswith("__") or c in {
+            "Latitud", "Longitud", "Conteo", "Sucursal_Normalizada",
+            "Semaforo Variacion", "Vales Disponible",
+        }
+    ]
+    if columnas_auxiliares:
+        tabla = tabla.drop(columns=columnas_auxiliares, errors="ignore")
+
+    dimensiones_preferidas = [
+        "País", "Estado", "Subdirección", "Zona", "Sucursal",
+        "Coordinacion", "Categoria", "Plazo", "Corte Texto",
+        "Fecha de Corte Texto",
+    ]
+    dimensiones = [c for c in dimensiones_preferidas if c in tabla.columns]
+
+    numericas = []
+    for col in tabla.columns:
+        if col in dimensiones:
+            continue
+        serie = pd.to_numeric(tabla[col], errors="coerce")
+        if serie.notna().any():
+            tabla[col] = serie.fillna(0)
+            numericas.append(col)
+
+    partes = [
+        f"{nombre_base}: {len(df):,} registros fuente dentro del alcance.",
+    ]
+
+    if numericas:
+        totales = {
+            col: float(pd.to_numeric(tabla[col], errors="coerce").fillna(0).sum())
+            for col in numericas
+        }
+        partes.append("TOTALES: " + json.dumps(totales, ensure_ascii=False))
+
+    agrupadores = [
+        c for c in ["Subdirección", "Zona", "Sucursal", "Categoria", "Plazo"]
+        if c in dimensiones
+    ]
+
+    if agrupadores and numericas:
+        reglas = {c: "sum" for c in numericas}
+        agregado = tabla.groupby(agrupadores, as_index=False).agg(reglas)
+
+        if {
+            "Distribuidoras Totales",
+            "Distribuidoras al Corriente",
+        }.issubset(agregado.columns):
+            agregado["Calidad de Cartera"] = agregado.apply(
+                lambda r: (
+                    r["Distribuidoras al Corriente"]
+                    / r["Distribuidoras Totales"] * 100
+                ) if r["Distribuidoras Totales"] else 0,
+                axis=1,
+            )
+
+        prioridades = [
+            "Distribuidoras en Mora",
+            "Mora",
+            "Capital",
+            "Total Dispersado",
+            "Total Dispersado Fecha Corte",
+            "Canjes",
+            "Total Canjes",
+            "Vales",
+        ]
+        ordenar = next((c for c in prioridades if c in agregado.columns), None)
+        if ordenar:
+            agregado = agregado.sort_values(ordenar, ascending=False)
+
+        partes.append(
+            "DETALLE AGREGADO:\n"
+            + agregado.head(max_filas).to_csv(index=False)
+        )
+    else:
+        columnas = dimensiones + numericas
+        if columnas:
+            partes.append(
+                "DETALLE:\n"
+                + tabla[columnas].head(max_filas).to_csv(index=False)
+            )
+
+    return "\n".join(partes)
+
+
+def _crear_contexto_integral_ia_vales(
     df_contexto: pd.DataFrame | None,
     nombre_valera: str,
     fecha_sel: str,
+    resumen_visible_html: str = "",
 ) -> str:
-    """Prepara un contexto ejecutivo y una tabla compacta sin alterar los cálculos del tablero."""
+    """
+    Construye un único contexto para resumen, comentarios y chatbot.
+
+    Combina:
+    - información visible y filtros activos;
+    - estructura/cartera de la vista actual;
+    - dispersión diaria;
+    - categorías;
+    - plazo y composición;
+    - tipos de desembolso;
+    - documento de interpretación del negocio.
+    """
     partes = [
+        "CONTEXTO GENERAL DEL TABLERO VALERAS",
         f"Valera activa: {nombre_valera}",
-        f"Fecha de corte visible: {fecha_sel}",
-        "RESUMEN EJECUTIVO VISIBLE:",
-        _html_a_texto_limpio(resumen_html),
+        f"Fecha de corte seleccionada: {fecha_sel}",
+        f"Nivel visible: {st.session_state.get('nivel_vista_resumen', st.session_state.get('nivel_vista', ''))}",
+        f"Tipo de mapa: {st.session_state.get('tipo_mapa_valeras', '')}",
+        f"Variable de tamaño: {st.session_state.get('variable_tamano', '')}",
+        f"Modo de tabla: {st.session_state.get('modo_tabla_resumen', 'Todos')}",
+        f"Incluir sin asignar: {st.session_state.get('incluir_sin_asignar', True)}",
     ]
+
+    if resumen_visible_html:
+        partes.extend([
+            "RESUMEN VISIBLE ACTUAL:",
+            _html_a_texto_limpio(resumen_visible_html),
+        ])
 
     if df_contexto is not None and not df_contexto.empty:
-        df_chat = df_contexto.copy()
-        columnas = [
-            "Subdirección", "Zona", "Sucursal", "Coordinacion",
-            "Calidad de Cartera", "Distribuidoras Totales",
-            "Distribuidoras al Corriente", "Distribuidoras en Mora",
-            "Var Dist Corriente", "Var Dist en Mora", "Total Dispersado",
-            "Canjes", "Canjes Fecha Corte", "Total Dispersado Fecha Corte",
-            "Canje Promedio Acumulado",
-        ]
-        columnas = [c for c in columnas if c in df_chat.columns]
+        partes.extend([
+            "BASE OPERATIVA ACTIVA, INCLUYENDO COLUMNAS NO MOSTRADAS EN PANTALLA:",
+            _resumir_base_para_ia(
+                df_contexto,
+                "Estructura, cartera y dispersión integradas",
+                max_filas=350,
+            ),
+        ])
 
-        if columnas:
-            for col in columnas:
-                if col not in ["Subdirección", "Zona", "Sucursal", "Coordinacion"]:
-                    df_chat[col] = pd.to_numeric(df_chat[col], errors="coerce").fillna(0)
+    # Dispersión diaria completa para la marca y el alcance actual.
+    try:
+        ruta = resolver_archivo_dispersion()
+        if ruta is not None:
+            df = cargar_dispersion_diaria(str(ruta))
+            df = _filtrar_marca_fecha_ia(df, nombre_valera, fecha_sel)
+            df = _aplicar_alcance_ia(df, df_contexto)
+            partes.append(_resumir_base_para_ia(df, "Dispersión diaria", 300))
+    except Exception as e:
+        partes.append(f"Dispersión diaria: no disponible ({e}).")
 
-            agrupadores = [c for c in ["Subdirección", "Zona", "Sucursal"] if c in columnas]
-            numericas = [c for c in columnas if c not in agrupadores + ["Coordinacion"]]
+    # Categorías de dispersión.
+    try:
+        if ARCHIVO_CATEGORIA_DISPERSION.exists():
+            df = cargar_categoria_dispersion(str(ARCHIVO_CATEGORIA_DISPERSION))
+            df = _filtrar_marca_fecha_ia(df, nombre_valera, fecha_sel)
+            df = _aplicar_alcance_ia(df, df_contexto)
+            partes.append(_resumir_base_para_ia(df, "Categorías de dispersión", 250))
+    except Exception as e:
+        partes.append(f"Categorías de dispersión: no disponible ({e}).")
 
-            if agrupadores:
-                reglas = {c: "sum" for c in numericas}
-                if "Calidad de Cartera" in reglas:
-                    reglas.pop("Calidad de Cartera")
+    # Plazo y composición.
+    try:
+        if ARCHIVO_PLAZO_COMPOSICION.exists():
+            df = cargar_plazo_composicion(str(ARCHIVO_PLAZO_COMPOSICION))
+            df = _filtrar_marca_fecha_ia(df, nombre_valera, fecha_sel)
+            df = _aplicar_alcance_ia(df, df_contexto)
+            partes.append(_resumir_base_para_ia(df, "Plazo y composición", 300))
+    except Exception as e:
+        partes.append(f"Plazo y composición: no disponible ({e}).")
 
-                tabla = df_chat.groupby(agrupadores, as_index=False).agg(reglas)
-
-                if {"Distribuidoras Totales", "Distribuidoras al Corriente"}.issubset(tabla.columns):
-                    tabla["Calidad de Cartera"] = tabla.apply(
-                        lambda r: (
-                            r["Distribuidoras al Corriente"]
-                            / r["Distribuidoras Totales"] * 100
-                        ) if r["Distribuidoras Totales"] else 0,
-                        axis=1,
-                    )
-
-                if "Distribuidoras en Mora" in tabla.columns:
-                    tabla = tabla.sort_values("Distribuidoras en Mora", ascending=False)
-                elif "Total Dispersado" in tabla.columns:
-                    tabla = tabla.sort_values("Total Dispersado", ascending=False)
-
-                tabla = tabla.head(120)
-                partes.extend([
-                    "DATOS OPERATIVOS DE LA SELECCIÓN ACTUAL:",
-                    tabla.to_csv(index=False),
-                ])
+    # Tipos de desembolso.
+    try:
+        if ARCHIVO_CLIENTES.exists():
+            df = cargar_clientes_tipos_desembolso(str(ARCHIVO_CLIENTES))
+            df = _filtrar_marca_fecha_ia(df, nombre_valera, fecha_sel)
+            df = _aplicar_alcance_ia(df, df_contexto)
+            partes.append(_resumir_base_para_ia(df, "Tipos de desembolso", 300))
+    except Exception as e:
+        partes.append(f"Tipos de desembolso: no disponible ({e}).")
 
     partes.extend([
-        "BASE DE INTERPRETACIÓN DEL NEGOCIO:",
+        "REGLAS DE INTERPRETACIÓN DEL NEGOCIO:",
         cargar_documento_interpretacion_negocio(),
+        """
+REGLAS DE LECTURA:
+- Distingue datos acumulados de datos del día exacto de corte.
+- No confundas capital, interés, total, dispersión, canjes y distribuidoras.
+- No atribuyas causalidad cuando los datos sólo muestran asociación.
+- Da prioridad a hallazgos accionables por Subdirección, Zona y Sucursal.
+- Si una cifra no aparece en el contexto, indica que no puede determinarse.
+""".strip(),
     ])
-    return "\n\n".join(partes)
+
+    contexto = "\n\n".join(str(p) for p in partes if str(p).strip())
+
+    # Protección contra contextos excesivos. Se conserva el principio y el final,
+    # donde están las reglas y la interpretación del negocio.
+    max_chars = 180_000
+    if len(contexto) > max_chars:
+        contexto = (
+            contexto[:145_000]
+            + "\n\n[CONTEXTO INTERMEDIO RECORTADO POR TAMAÑO]\n\n"
+            + contexto[-35_000:]
+        )
+
+    return contexto
 
 
-def _obtener_respuesta_chatbot_vales(
-    pregunta: str,
+def _consultar_openai_vales(
+    instrucciones: str,
     contexto: str,
-    historial: list[dict],
+    entrada_usuario: str,
+    historial: list[dict] | None = None,
 ) -> str:
-    """Consulta el modelo configurado usando únicamente la información visible del tablero."""
+    """Función única para resumen, comentarios y chatbot."""
     if OpenAI is None:
-        return (
-            "No está instalada la librería openai. Ejecuta: "
-            "pip install openai"
-        )
+        return ""
 
-    api_key = ""
-    try:
-        api_key = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
-    except Exception:
-        api_key = ""
-    api_key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
-
+    api_key, modelo = _obtener_configuracion_openai_vales()
     if not api_key:
-        return (
-            "Falta configurar OPENAI_API_KEY en .streamlit/secrets.toml "
-            "o en los Secrets de Streamlit Cloud."
-        )
+        return ""
 
-    try:
-        modelo = str(st.secrets.get("OPENAI_MODEL", "gpt-5.4-mini"))
-    except Exception:
-        modelo = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+    mensajes = [{
+        "role": "developer",
+        "content": instrucciones.strip() + "\n\nCONTEXTO DEL TABLERO:\n" + contexto,
+    }]
 
-    instrucciones = """
-Eres el chatbot ejecutivo del tablero Valeras. Responde en español claro, fluido y orientado al negocio de vales.
-Usa exclusivamente el contexto proporcionado. No inventes cifras, causas ni sucursales.
-Cuando una respuesta no pueda determinarse con los datos, dilo expresamente.
-Prioriza hallazgos, comparaciones, riesgos, oportunidades y acciones concretas.
-Distingue siempre entre datos acumulados y datos del día de corte.
-Mantén la respuesta breve, salvo que el usuario solicite un análisis amplio.
-""".strip()
-
-    mensajes = [
-        {
-            "role": "developer",
-            "content": instrucciones + "\n\nCONTEXTO DEL TABLERO:\n" + contexto,
-        }
-    ]
-    for mensaje in historial[-8:]:
+    for mensaje in (historial or [])[-8:]:
         if mensaje.get("role") in {"user", "assistant"}:
             mensajes.append({
                 "role": mensaje["role"],
                 "content": str(mensaje.get("content", "")),
             })
-    mensajes.append({"role": "user", "content": pregunta})
+
+    mensajes.append({"role": "user", "content": entrada_usuario})
 
     try:
         cliente = OpenAI(api_key=api_key)
@@ -4567,10 +4801,131 @@ Mantén la respuesta breve, salvo que el usuario solicite un análisis amplio.
             model=modelo,
             input=mensajes,
         )
-        texto = getattr(respuesta, "output_text", "")
-        return texto.strip() or "No pude generar una respuesta con el contexto actual."
-    except Exception as e:
-        return f"No pude consultar el chatbot: {e}"
+        return str(getattr(respuesta, "output_text", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _generar_comentario_ia_html(
+    tipo_comentario: str,
+    comentario_base_html: str,
+    contexto: str,
+    instrucciones_adicionales: str = "",
+) -> str:
+    """
+    Convierte el cálculo determinista existente en un comentario redactado por IA.
+    Si la API falla, conserva exactamente el comentario previo como respaldo.
+    """
+    if not comentario_base_html:
+        return ""
+
+    contexto_local = (
+        contexto
+        + "\n\nDATOS Y CÁLCULOS DEL OBJETO VISUAL ACTUAL:\n"
+        + _html_a_texto_limpio(comentario_base_html)
+    )
+
+    clave = hashlib.sha256(
+        (
+            tipo_comentario
+            + contexto_local
+            + instrucciones_adicionales
+        ).encode("utf-8", errors="ignore")
+    ).hexdigest()
+
+    cache_key = f"_cache_comentario_ia_{clave}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    instrucciones = f"""
+Eres analista ejecutivo del negocio de vales.
+Redacta el comentario de tipo: {tipo_comentario}.
+Usa información visible y no visible incluida en el contexto.
+No inventes cifras, causas, tendencias ni relaciones.
+Relaciona cartera, mora, distribuidoras al corriente, variaciones, dispersión,
+canjes, categorías, plazo, composición y tipos de desembolso cuando sean relevantes.
+Distingue acumulados del dato del día de corte.
+Escribe en español natural y orientado a decisiones.
+Devuelve únicamente HTML válido con esta estructura:
+<div class="ai-panel">
+  <p>...</p>
+  <p>...</p>
+  <p>...</p>
+</div>
+No uses Markdown ni encabezados fuera del div.
+{instrucciones_adicionales}
+""".strip()
+
+    respuesta = _consultar_openai_vales(
+        instrucciones=instrucciones,
+        contexto=contexto_local,
+        entrada_usuario=(
+            "Genera el comentario ejecutivo del objeto visual actual. "
+            "Incluye hallazgo principal, riesgo u oportunidad y acción sugerida."
+        ),
+    )
+
+    if respuesta and "<div" in respuesta:
+        resultado = respuesta
+    else:
+        resultado = comentario_base_html
+
+    st.session_state[cache_key] = resultado
+    return resultado
+
+def _crear_contexto_chatbot_vales(
+    resumen_html: str,
+    df_contexto: pd.DataFrame | None,
+    nombre_valera: str,
+    fecha_sel: str,
+) -> str:
+    """Usa todas las bases disponibles, además de la información visible."""
+    return _crear_contexto_integral_ia_vales(
+        df_contexto=df_contexto,
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+        resumen_visible_html=resumen_html,
+    )
+
+
+def _obtener_respuesta_chatbot_vales(
+    pregunta: str,
+    contexto: str,
+    historial: list[dict],
+) -> str:
+    """Responde usando información visible y no visible de todas las bases."""
+    if OpenAI is None:
+        return (
+            "No está instalada la librería openai. Ejecuta: "
+            "pip install openai"
+        )
+
+    api_key, _ = _obtener_configuracion_openai_vales()
+    if not api_key:
+        return (
+            "Falta configurar OPENAI_API_KEY en los Secrets de Streamlit Cloud."
+        )
+
+    instrucciones = """
+Eres el chatbot ejecutivo del tablero Valeras.
+Responde en español claro, fluido y orientado al negocio de vales.
+Usa exclusivamente el contexto proporcionado, que combina información visible
+y no visible de las bases del tablero.
+No inventes cifras, causas, sucursales ni tendencias.
+Cuando una respuesta no pueda determinarse con los datos, dilo expresamente.
+Prioriza hallazgos, comparaciones, riesgos, oportunidades y acciones concretas.
+Distingue siempre acumulados, datos del día de corte y cortes históricos.
+Cuando compares sucursales, menciona los indicadores que justifican la conclusión.
+Mantén la respuesta breve, salvo que el usuario solicite un análisis amplio.
+""".strip()
+
+    respuesta = _consultar_openai_vales(
+        instrucciones=instrucciones,
+        contexto=contexto,
+        entrada_usuario=pregunta,
+        historial=historial,
+    )
+    return respuesta or "No pude generar una respuesta con el contexto actual."
 
 
 @st.dialog("Resumen completo de Vales", width="large")
@@ -4583,7 +4938,7 @@ def _dialogo_resumen_con_chatbot(
     st.markdown("---")
     st.markdown("### Pregúntale al tablero")
     st.caption(
-        "El chatbot responde con la marca, corte, filtros y datos que están activos en esta vista."
+        "El chatbot analiza la información visible y no visible de todas las bases, respetando la marca, el corte y los filtros activos."
     )
 
     historial_key = f"chat_vales_historial_{clave_chat}"
@@ -4616,7 +4971,7 @@ def _dialogo_resumen_con_chatbot(
     if enviar and pregunta.strip():
         historial_previo = list(st.session_state[historial_key])
         st.session_state[historial_key].append({"role": "user", "content": pregunta.strip()})
-        with st.spinner("Analizando la información visible..."):
+        with st.spinner("Analizando todas las bases del tablero..."):
             respuesta = _obtener_respuesta_chatbot_vales(
                 pregunta=pregunta.strip(),
                 contexto=contexto_chatbot,
@@ -4634,12 +4989,20 @@ def renderizar_robot_resumen_ejecutivo(
 ) -> None:
     """Conserva el botón del robot y abre el resumen con un chatbot integrado."""
     clave_chat = re.sub(r"[^a-zA-Z0-9]+", "_", f"{nombre_valera}_{fecha_sel}").strip("_").lower()
-    contexto_chatbot = _crear_contexto_chatbot_vales(
-        resumen_html=resumen_html,
-        df_contexto=df_contexto,
-        nombre_valera=nombre_valera,
-        fecha_sel=fecha_sel,
-    )
+    contexto_chatbot = st.session_state.get("_contexto_integral_ia_vales", "")
+    if not contexto_chatbot:
+        contexto_chatbot = _crear_contexto_chatbot_vales(
+            resumen_html=resumen_html,
+            df_contexto=df_contexto,
+            nombre_valera=nombre_valera,
+            fecha_sel=fecha_sel,
+        )
+    else:
+        contexto_chatbot = (
+            contexto_chatbot
+            + "\n\nRESUMEN EJECUTIVO GENERADO:\n"
+            + _html_a_texto_limpio(resumen_html)
+        )
 
     st.markdown(
         """
@@ -4865,7 +5228,17 @@ def construir_comentario_ia_mapa(
 
 
 def mostrar_comentario_ia_mapa(*args, **kwargs):
-    html = construir_comentario_ia_mapa(*args, **kwargs)
+    html_base = construir_comentario_ia_mapa(*args, **kwargs)
+    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
+    html = _generar_comentario_ia_html(
+        tipo_comentario="comentario del mapa operativo",
+        comentario_base_html=html_base,
+        contexto=contexto,
+        instrucciones_adicionales=(
+            "Interpreta el mapa y sus filtros activos. Señala concentración, "
+            "calidad, mora, variaciones y actividad comercial relevante."
+        ),
+    ) if contexto else html_base
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -4957,7 +5330,17 @@ def construir_comentario_ia_mapa_plazo_composicion(
 
 
 def mostrar_comentario_ia_mapa_plazo_composicion(*args, **kwargs):
-    html = construir_comentario_ia_mapa_plazo_composicion(*args, **kwargs)
+    html_base = construir_comentario_ia_mapa_plazo_composicion(*args, **kwargs)
+    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
+    html = _generar_comentario_ia_html(
+        tipo_comentario="comentario de plazo y composición",
+        comentario_base_html=html_base,
+        contexto=contexto,
+        instrucciones_adicionales=(
+            "Relaciona capital, interés, total, vales, tasa de ganancia, plazo, "
+            "categorías, calidad de cartera y riesgo operativo."
+        ),
+    ) if contexto else html_base
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -5033,7 +5416,18 @@ def construir_comentario_ia_tabla_resumen(
 
 
 def mostrar_comentario_ia_tabla_resumen(*args, **kwargs):
-    html = construir_comentario_ia_tabla_resumen(*args, **kwargs)
+    html_base = construir_comentario_ia_tabla_resumen(*args, **kwargs)
+    contexto = st.session_state.get("_contexto_integral_ia_vales", "")
+    html = _generar_comentario_ia_html(
+        tipo_comentario="comentario de la tabla de resumen",
+        comentario_base_html=html_base,
+        contexto=contexto,
+        instrucciones_adicionales=(
+            "Respeta Todos, Top 10, Bottom 10, nivel, orden y búsqueda activos. "
+            "Aclara cuándo el comentario se refiere sólo a filas visibles y "
+            "complementa con hallazgos de las bases no visibles."
+        ),
+    ) if contexto else html_base
     if html:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -7930,7 +8324,15 @@ def mostrar_mapa(valera_param: str):
     tipo_mapa = st.session_state.get("tipo_mapa_valeras", tipo_mapa)
     variable_tamano = st.session_state.get("variable_tamano", variable_tamano)
 
-    resumen_ejecutivo_html = mostrar_comentarios_ia(
+    # Contexto único: información visible + información no visible de todas las bases.
+    contexto_integral_ia = _crear_contexto_integral_ia_vales(
+        df_contexto=df_resumen_base,
+        nombre_valera=nombre_valera,
+        fecha_sel=fecha_sel,
+    )
+    st.session_state["_contexto_integral_ia_vales"] = contexto_integral_ia
+
+    resumen_ejecutivo_base_html = mostrar_comentarios_ia(
         df_resumen_base=df_resumen_base,
         df_mapa=df_mapa_previo,
         resumen_pais=pd.DataFrame(),
@@ -7943,6 +8345,19 @@ def mostrar_mapa(valera_param: str):
         conservar_tarjetas=bool(subdireccion_sel or estado_sel),
         devolver_html=True,
     )
+
+    resumen_ejecutivo_html = _generar_comentario_ia_html(
+        tipo_comentario="resumen completo ejecutivo de Vales",
+        comentario_base_html=resumen_ejecutivo_base_html or "",
+        contexto=contexto_integral_ia,
+        instrucciones_adicionales=(
+            "El resumen debe integrar cartera, mora, variaciones, dispersión, "
+            "canjes, categorías, plazo y composición, tipos de desembolso y "
+            "focos territoriales. Incluye diagnóstico, atención requerida, "
+            "oportunidades y prioridades operativas. No te limites a lo visible."
+        ),
+    )
+
     renderizar_robot_resumen_ejecutivo(
         resumen_ejecutivo_html or "",
         df_contexto=df_resumen_base,
