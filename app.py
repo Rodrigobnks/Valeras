@@ -5370,24 +5370,35 @@ def _dialogo_resumen_con_chatbot(
 
     if limpiar:
         st.session_state[historial_key] = []
-        st.rerun()
+        st.info("Conversación limpiada.")
 
     if enviar and pregunta.strip():
+        pregunta_enviada = pregunta.strip()
+
         st.session_state[historial_key].append(
-            {"role": "user", "content": pregunta.strip()}
+            {"role": "user", "content": pregunta_enviada}
         )
+
+        # Se muestra inmediatamente dentro del diálogo para evitar cerrarlo.
+        with st.chat_message("user"):
+            st.markdown(pregunta_enviada)
+
         with st.spinner("Calculando la respuesta con las bases del tablero..."):
             respuesta = _obtener_respuesta_chatbot_vales(
-                pregunta=pregunta.strip(),
+                pregunta=pregunta_enviada,
                 df_contexto=df_contexto,
                 nombre_valera=nombre_valera,
                 fecha_sel=fecha_sel,
                 historial=st.session_state[historial_key][:-1],
             )
+
         st.session_state[historial_key].append(
             {"role": "assistant", "content": respuesta}
         )
-        st.rerun()
+
+        # No se usa st.rerun(): el rerun cerraba el diálogo del robot.
+        with st.chat_message("assistant"):
+            st.markdown(respuesta)
 
 
 def renderizar_robot_resumen_ejecutivo(
