@@ -5329,12 +5329,55 @@ def _dialogo_resumen_con_chatbot(
     fecha_sel: str,
     clave_chat: str,
 ):
+    """
+    Diálogo con resumen fijo arriba, conversación con scroll al centro
+    y caja de nueva pregunta siempre disponible abajo.
+    """
+    # El resumen queda fuera del contenedor desplazable del chat.
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stDialog"] div[role="dialog"] {
+            max-height: 92vh;
+        }
+
+        .resumen-robot-fijo {
+            background: #ffffff;
+            position: relative;
+            z-index: 2;
+            padding-bottom: 4px;
+        }
+
+        .titulo-chat-robot {
+            margin-top: 8px;
+            margin-bottom: 2px;
+        }
+
+        .ayuda-chat-robot {
+            color: #667085;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="resumen-robot-fijo">', unsafe_allow_html=True)
     st.markdown(resumen_html, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("---")
-    st.markdown("### Pregúntale al tablero")
-    st.caption(
-        "Chatbot local sin API: calcula las respuestas directamente con las bases "
-        "y respeta la marca, el corte y los filtros activos."
+    st.markdown(
+        '<div class="titulo-chat-robot"><strong>Pregúntale al tablero</strong></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="ayuda-chat-robot">'
+        'La conversación se desplaza dentro del recuadro. '
+        'Escribe cada nueva pregunta en la caja inferior.'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
     historial_key = f"chat_vales_historial_{clave_chat}"
@@ -5343,13 +5386,13 @@ def _dialogo_resumen_con_chatbot(
     if historial_key not in st.session_state:
         st.session_state[historial_key] = []
 
-    for mensaje in st.session_state[historial_key]:
-        with st.chat_message(mensaje["role"]):
-            st.markdown(mensaje["content"])
+    # Se reserva primero el espacio visual del chat. Se llena después de procesar
+    # la pregunta para que usuario y respuesta aparezcan en el orden correcto.
+    chat_placeholder = st.empty()
 
     pregunta = st.text_input(
-        "Pregunta",
-        placeholder="Ejemplo: ¿Qué sucursal requiere mayor atención y por qué?",
+        "Nueva pregunta",
+        placeholder="Escribe aquí otra pregunta para continuar el chat…",
         key=pregunta_key,
         label_visibility="collapsed",
     )
@@ -5361,6 +5404,7 @@ def _dialogo_resumen_con_chatbot(
             key=f"chat_vales_enviar_{clave_chat}",
             use_container_width=True,
         )
+
     with col_limpiar:
         limpiar = st.button(
             "Limpiar",
@@ -5370,7 +5414,6 @@ def _dialogo_resumen_con_chatbot(
 
     if limpiar:
         st.session_state[historial_key] = []
-        st.info("Conversación limpiada.")
 
     if enviar and pregunta.strip():
         pregunta_enviada = pregunta.strip()
@@ -5378,10 +5421,6 @@ def _dialogo_resumen_con_chatbot(
         st.session_state[historial_key].append(
             {"role": "user", "content": pregunta_enviada}
         )
-
-        # Se muestra inmediatamente dentro del diálogo para evitar cerrarlo.
-        with st.chat_message("user"):
-            st.markdown(pregunta_enviada)
 
         with st.spinner("Calculando la respuesta con las bases del tablero..."):
             respuesta = _obtener_respuesta_chatbot_vales(
@@ -5396,9 +5435,18 @@ def _dialogo_resumen_con_chatbot(
             {"role": "assistant", "content": respuesta}
         )
 
-        # No se usa st.rerun(): el rerun cerraba el diálogo del robot.
-        with st.chat_message("assistant"):
-            st.markdown(respuesta)
+    # Únicamente esta sección tiene scroll. El resumen y la caja para escribir
+    # permanecen fuera del área desplazable.
+    with chat_placeholder.container(height=360, border=True):
+        if not st.session_state[historial_key]:
+            st.caption(
+                "Todavía no hay preguntas. Puedes comenzar, por ejemplo, con: "
+                "¿Qué sucursal requiere mayor atención y por qué?"
+            )
+        else:
+            for mensaje in st.session_state[historial_key]:
+                with st.chat_message(mensaje["role"]):
+                    st.markdown(mensaje["content"])
 
 
 def renderizar_robot_resumen_ejecutivo(
