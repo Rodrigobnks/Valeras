@@ -5307,6 +5307,125 @@ def _fila_chatbot(
     return tabla.loc[indice]
 
 
+def _detectar_solicitud_ranking_chatbot(pregunta: str) -> tuple[str, int] | None:
+    """Devuelve (sentido, cantidad) para expresiones Top/Bottom de cualquier N."""
+    texto = limpiar_texto(pregunta)
+    coincidencia = re.search(r"\b(TOP|BOTTOM)\s*(?:DE\s*)?(\d+)?\b", texto)
+    if not coincidencia:
+        return None
+
+    sentido = "bottom" if coincidencia.group(1) == "BOTTOM" else "top"
+    cantidad = int(coincidencia.group(2) or 10)
+    # Evita respuestas gigantes por error de captura, sin limitar los rangos normales.
+    cantidad = max(1, min(cantidad, 500))
+    return sentido, cantidad
+
+
+def _resolver_variable_ranking_chatbot(
+    pregunta: str,
+    tabla: pd.DataFrame,
+) -> str | None:
+    """Reconoce una métrica por su nombre real o por alias de negocio comunes."""
+    texto = limpiar_texto(pregunta)
+
+    aliases = {
+        "DISPERSION DEL DIA": "Total Dispersado Fecha Corte",
+        "DISPERSADO DEL DIA": "Total Dispersado Fecha Corte",
+        "DISPERSION ACUMULADA": "Total Dispersado",
+        "DISPERSION": "Total Dispersado",
+        "DISPERSADO": "Total Dispersado",
+        "CANJES DEL DIA": "Canjes Fecha Corte",
+        "CANJE PROMEDIO": "Canje Promedio",
+        "CANJES": "Canjes",
+        "MONTO DE MORA": "Mora",
+        "SALDO VENCIDO": "Mora",
+        "DISTRIBUIDORAS EN MORA": "Distribuidoras en Mora",
+        "MORA": "Distribuidoras en Mora",
+        "CALIDAD DE CARTERA": "Calidad de Cartera",
+        "CALIDAD": "Calidad de Cartera",
+        "DISTRIBUIDORAS AL CORRIENTE": "Distribuidoras al Corriente",
+        "DISTRIBUIDORAS TOTALES": "Distribuidoras Totales",
+        "CLIENTES AL CORRIENTE": "Clientes al Corriente",
+        "CLIENTES TOTALES": "Clientes Totales",
+        "COLOCADO NETO AL CORRIENTE": "Colocado Neto al Corriente",
+        "COLOCADO NETO": "Colocado Neto",
+        "COLOCADO PP": "Colocado PP",
+        "CARTERA FINANCIERA": "Cartera Financiera",
+        "PUNTAJE DE ATENCION": "Puntaje de Atención",
+        "PORCENTAJE EN MORA": "Porcentaje en Mora",
+    }
+
+    # Los nombres reales de columnas tienen prioridad y hacen extensible el ranking.
+    candidatos = []
+    for columna in tabla.columns:
+        serie = pd.to_numeric(tabla[columna], errors="coerce")
+        if serie.notna().any():
+            nombre_norm = limpiar_texto(columna)
+            if nombre_norm and nombre_norm in texto:
+                candidatos.append((len(nombre_norm), columna))
+
+    for alias, columna in aliases.items():
+        if alias in texto and columna in tabla.columns:
+            candidatos.append((len(alias), columna))
+
+    if not candidatos:
+        return None
+    return max(candidatos, key=lambda item: item[0])[1]
+
+
+def _formatear_variable_ranking_chatbot(columna: str, valor: float) -> str:
+    nombre = limpiar_texto(columna)
+    if any(x in nombre for x in ["CALIDAD", "PORCENTAJE", "TASA"]):
+        return f"{float(valor):,.2f}%"
+    if any(
+        x in nombre
+        for x in [
+            "DISPERSADO", "CARTERA", "COLOCADO", "MORA", "CAPITAL",
+            "INTERES", "MONTO", "CANJE PROMEDIO", "TOTAL FINANCIERO",
+        ]
+    ) and "DISTRIBUIDORAS EN MORA" not in nombre:
+        return _formato_chat_moneda(valor)
+    return _formato_chat_numero(valor)
+
+
+def _respuesta_ranking_chatbot(
+    tabla: pd.DataFrame,
+    nivel: str,
+    columna: str,
+    sentido: str,
+    cantidad: int,
+) -> str:
+    valores = pd.to_numeric(tabla[columna], errors="coerce")
+    ranking = tabla.assign(_valor_ranking=valores).dropna(subset=["_valor_ranking"])
+    ranking = ranking.sort_values(
+        ["_valor_ranking", nivel],
+        ascending=[sentido == "bottom", True],
+        kind="stable",
+    ).head(cantidad)
+
+    if ranking.empty:
+        return f"No hay datos numéricos de **{columna}** para construir el ranking."
+
+    cantidad_real = len(ranking)
+    titulo = "Bottom" if sentido == "bottom" else "Top"
+    lineas = [
+        f"**{titulo} {cantidad_real} por {columna} a nivel {nivel.lower()}:**"
+    ]
+    for posicion, (_, fila) in enumerate(ranking.iterrows(), start=1):
+        valor = _formatear_variable_ranking_chatbot(
+            columna,
+            float(fila["_valor_ranking"]),
+        )
+        lineas.append(f"{posicion}. **{fila[nivel]}** — {valor}")
+
+    if cantidad_real < cantidad:
+        lineas.append(
+            f"_Se solicitaron {cantidad}, pero el alcance actual sólo contiene "
+            f"{cantidad_real} registros con datos._"
+        )
+    return "\n".join(lineas)
+
+
 def _explicar_prioridad_local(fila: pd.Series, nivel: str) -> str:
     nombre = str(fila.get(nivel, "La selección"))
     mora = float(fila.get("Distribuidoras en Mora", 0))
@@ -5494,6 +5613,33 @@ def _obtener_respuesta_chatbot_vales(
             "Puedo identificar intenciones, palabras clave, agrupación, cálculo, "
             "orden y plantilla de respuesta. Algunos ejemplos son:\n"
             + lista
+        )
+
+    # Ranking genérico: Top/Bottom con cualquier cantidad y métrica disponible.
+    solicitud_ranking = _detectar_solicitud_ranking_chatbot(pregunta)
+    if solicitud_ranking:
+        sentido, cantidad = solicitud_ranking
+        columna_ranking = _resolver_variable_ranking_chatbot(pregunta, tabla)
+        if columna_ranking is None:
+            metricas_disponibles = [
+                columna
+                for columna in tabla.columns
+                if columna != nivel
+                and pd.to_numeric(tabla[columna], errors="coerce").notna().any()
+            ]
+            muestra = ", ".join(f"**{m}**" for m in metricas_disponibles[:12])
+            return (
+                "Entendí el rango solicitado, pero no identifiqué la variable. "
+                f"Puedes pedir, por ejemplo, **top {cantidad} de dispersión** o "
+                f"**bottom {cantidad} de calidad de cartera**. "
+                f"Variables disponibles en esta vista: {muestra}."
+            )
+        return _respuesta_ranking_chatbot(
+            tabla=tabla,
+            nivel=nivel,
+            columna=columna_ranking,
+            sentido=sentido,
+            cantidad=cantidad,
         )
 
     # Categorías.
