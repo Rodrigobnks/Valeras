@@ -3367,6 +3367,14 @@ st.markdown(
 }}
 
 @media (max-width: 700px) {{
+    /* Ajustes exclusivos para celular; la vista de escritorio no cambia. */
+    .block-container {{
+        width: 100%;
+        max-width: 100%;
+        padding: calc(0.75rem + env(safe-area-inset-top)) 0.75rem 2rem 0.75rem;
+        overflow-x: hidden;
+    }}
+
     .cards-grid {{
         grid-template-columns: 1fr;
         gap: 18px;
@@ -3377,7 +3385,7 @@ st.markdown(
     }}
 
     .hero h1 {{
-        font-size: 38px;
+        font-size: clamp(30px, 10vw, 38px);
     }}
 
     .hero .descripcion {{
@@ -3386,11 +3394,131 @@ st.markdown(
 
     .kpi-grid {{
         grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }}
+
+    .kpi-card {{
+        padding: 14px 12px;
+        min-width: 0;
+    }}
+
+    .kpi-value {{
+        font-size: clamp(21px, 7vw, 28px);
+        overflow-wrap: anywhere;
     }}
 
     .top-bar {{
         flex-direction: column;
         align-items: flex-start;
+    }}
+
+    .map-title {{
+        max-width: calc(100vw - 1.5rem);
+        font-size: clamp(25px, 8vw, 34px);
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+    }}
+
+    .selector-box,
+    .resumen-title-box,
+    .ai-panel,
+    .map-guide-side {{
+        max-width: 100%;
+        padding-left: 14px;
+        padding-right: 14px;
+    }}
+
+    /* Los mapas y treemaps conservan todo su contenido, con una altura útil
+       para celular y sin provocar desplazamiento horizontal. */
+    div[data-testid="stPlotlyChart"] {{
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+    }}
+
+    div[data-testid="stPlotlyChart"] .js-plotly-plot,
+    div[data-testid="stPlotlyChart"] .plot-container,
+    div[data-testid="stPlotlyChart"] .svg-container {{
+        width: 100% !important;
+        height: min(62vh, 520px) !important;
+        min-height: 390px !important;
+    }}
+
+    div[data-testid="stPlotlyChart"] .modebar-container {{
+        display: none !important;
+    }}
+
+    div[data-testid="stPlotlyChart"] .g-gtitle text {{
+        font-size: 12px !important;
+    }}
+
+    /* En celular las tablas se desplazan horizontalmente; no se comprimen
+       hasta volver ilegibles sus columnas. */
+    .tabla-valeras-wrap,
+    .tabla-valeras-wrap.scroll-interno {{
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto !important;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-inline: contain;
+        border: 1px solid rgba(11,42,111,0.10);
+        border-radius: 10px;
+    }}
+
+    .tabla-valeras-wrap table {{
+        width: max-content !important;
+        min-width: 760px !important;
+        table-layout: auto !important;
+    }}
+
+    .tabla-valeras-wrap th,
+    .tabla-valeras-wrap td {{
+        min-width: 108px;
+        max-width: 190px;
+        font-size: 12px !important;
+        padding: 7px 8px !important;
+    }}
+
+    .tabla-valeras-wrap th:first-child,
+    .tabla-valeras-wrap td:first-child {{
+        min-width: 132px;
+    }}
+
+    /* Paneles de ayuda dentro del ancho visible del teléfono. */
+    .map-help-widget {{
+        left: 0 !important;
+        right: auto !important;
+        max-width: calc(100vw - 1.5rem);
+    }}
+
+    .map-help-panel {{
+        width: calc(100vw - 1.5rem) !important;
+        max-width: calc(100vw - 1.5rem) !important;
+        max-height: 65vh;
+        overflow-y: auto;
+        box-sizing: border-box;
+        font-size: 13px !important;
+    }}
+
+    div[data-testid="stDialog"] div[role="dialog"] {{
+        width: calc(100vw - 16px) !important;
+        max-width: calc(100vw - 16px) !important;
+        max-height: calc(100dvh - 16px) !important;
+        margin: 8px !important;
+    }}
+}}
+
+@media (max-width: 420px) {{
+    .kpi-grid {{
+        grid-template-columns: 1fr;
+    }}
+
+    div[data-testid="stPlotlyChart"] .js-plotly-plot,
+    div[data-testid="stPlotlyChart"] .plot-container,
+    div[data-testid="stPlotlyChart"] .svg-container {{
+        height: min(58vh, 470px) !important;
+        min-height: 360px !important;
     }}
 }}
 </style>
@@ -6241,7 +6369,23 @@ def renderizar_robot_resumen_ejecutivo(
     box-shadow: 0 10px 28px rgba(31, 43, 119, 0.24);
 }
 @media (max-width: 900px) {
-    .st-key-robot_resumen_ejecutivo { right: 164px; top: 30px; }
+    .st-key-robot_resumen_ejecutivo {
+        position: fixed !important;
+        top: max(10px, env(safe-area-inset-top)) !important;
+        right: max(10px, env(safe-area-inset-right)) !important;
+        left: auto !important;
+        bottom: auto !important;
+        width: 46px !important;
+        z-index: 2147483000 !important;
+    }
+
+    .st-key-robot_resumen_ejecutivo button {
+        width: 46px !important;
+        height: 46px !important;
+        min-height: 46px !important;
+        border-radius: 12px !important;
+        touch-action: manipulation;
+    }
 }
 </style>
 """,
