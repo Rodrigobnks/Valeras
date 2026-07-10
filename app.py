@@ -3457,14 +3457,7 @@ st.markdown(
         overflow: visible !important;
     }}
 
-    div[data-testid="stPlotlyChart"] .js-plotly-plot,
-    div[data-testid="stPlotlyChart"] .plot-container,
-    div[data-testid="stPlotlyChart"] .svg-container {{
-        width: 100% !important;
-        max-width: 100% !important;
-    }}
-
-    div[data-testid="stPlotlyChart"] .modebar-container {{
+  div[data-testid="stPlotlyChart"] .modebar-container {{
         display: none !important;
     }}
 
@@ -3472,17 +3465,9 @@ st.markdown(
         font-size: 12px !important;
     }}
 
-    /* En mapas nacionales, las burbujas grandes no deben tapar el territorio
-       completo en una pantalla angosta. La escala sólo cambia en celular. */
-    div[data-testid="stPlotlyChart"] .scatterlayer .point {{
-        scale: 0.78;
-        transform-box: fill-box;
-        transform-origin: center;
-    }}
-
-    div[data-testid="stPlotlyChart"] .legendtext {{
-        font-size: 10px !important;
-    }}
+  div[data-testid="stPlotlyChart"] .legendtext {{
+      font-size: 10px !important;
+  }}
 
     div[data-testid="stPlotlyChart"] .treemaplayer text {{
         font-size: 11px !important;
