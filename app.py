@@ -5577,10 +5577,21 @@ def _detectar_solicitud_ranking_chatbot(pregunta: str) -> tuple[str, int] | None
     # Formas naturales: "las 5 mejores", "10 peores", "5 con más",
     # "las 15 de mayor..." o "5 con menos".
     numero = re.search(r"\b(\d{1,3})\b", texto)
-    if not numero:
-        return None
 
-    cantidad = int(numero.group(1))
+    # Sin cantidad explícita, expresiones como "sucursal con más capital"
+    # equivalen a pedir el primer lugar. Se exige una métrica reconocible para
+    # no interceptar preguntas generales como "¿quién requiere atención?".
+    metricas_explicitas = [
+        "CAPITAL", "INTERES", "GANANCIA", "DISTRIBUIDORA", "DISPERSION",
+        "DISPERSADO", "CANJE", "CALIDAD", "MORA", "CLIENTE", "COLOCADO",
+        "CARTERA", "VALES", "TASA",
+    ]
+    if numero:
+        cantidad = int(numero.group(1))
+    elif any(metrica in texto for metrica in metricas_explicitas):
+        cantidad = 1
+    else:
+        return None
 
     pistas_top = [
         r"\bMEJORES?\b",
@@ -5625,6 +5636,8 @@ def _resolver_variable_ranking_chatbot(
         "TASA GANANCIA": "Tasa de Ganancia",
         "MONTO PROMEDIO POR VALE": "Monto Promedio por Vale",
         "TOTAL FINANCIERO": "Total Financiero",
+        "CAPITAL INVERTIDO": "Capital",
+        "CAPITAL COLOCADO": "Capital",
         "GANANCIA": "Ganancia",
         "CAPITAL": "Capital",
         "INTERES": "Interes",
