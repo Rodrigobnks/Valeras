@@ -2276,8 +2276,10 @@ def mostrar_grafica_categorias(
                 values=resumen["Capital"],
                 hole=0.48,
                 sort=False,
-                textinfo="label+percent",
-                textposition="outside",
+                textinfo="percent",
+                textposition="inside",
+                insidetextorientation="horizontal",
+                automargin=True,
                 hovertemplate=(
                     "<b>%{label}</b><br>"
                     "Capital: $%{value:,.0f}<br>"
@@ -2288,17 +2290,30 @@ def mostrar_grafica_categorias(
     )
     fig.update_layout(
         title={
-            "text": f"Categorías de dispersión · {nombre_valera} · al {fecha_usada}",
-            "x": 0.02,
-            "xanchor": "left",
+            "text": f"Categorías de dispersión<br><sup>{nombre_valera} · al {fecha_usada}</sup>",
+            "x": 0.5,
+            "xanchor": "center",
         },
-        margin=dict(l=35, r=35, t=75, b=35),
+        margin=dict(l=18, r=18, t=72, b=72),
         height=430,
         showlegend=True,
-        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
+        uniformtext_minsize=10,
+        uniformtext_mode="hide",
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.08,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+        ),
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": True},
+    )
     st.caption(mensaje)
 
 
@@ -3440,8 +3455,8 @@ st.markdown(
     div[data-testid="stPlotlyChart"] .plot-container,
     div[data-testid="stPlotlyChart"] .svg-container {{
         width: 100% !important;
-        height: min(62vh, 520px) !important;
-        min-height: 390px !important;
+        height: min(52vh, 440px) !important;
+        min-height: 350px !important;
     }}
 
     div[data-testid="stPlotlyChart"] .modebar-container {{
@@ -3450,6 +3465,27 @@ st.markdown(
 
     div[data-testid="stPlotlyChart"] .g-gtitle text {{
         font-size: 12px !important;
+    }}
+
+    /* En mapas nacionales, las burbujas grandes no deben tapar el territorio
+       completo en una pantalla angosta. La escala sólo cambia en celular. */
+    div[data-testid="stPlotlyChart"] .scatterlayer .point {{
+        scale: 0.78;
+        transform-box: fill-box;
+        transform-origin: center;
+    }}
+
+    div[data-testid="stPlotlyChart"] .legendtext {{
+        font-size: 10px !important;
+    }}
+
+    div[data-testid="stPlotlyChart"] .treemaplayer text {{
+        font-size: 11px !important;
+    }}
+
+    div[data-testid="stPlotlyChart"] .pielayer text,
+    div[data-testid="stPlotlyChart"] .cbaxis text {{
+        font-size: 10px !important;
     }}
 
     /* En celular las tablas se desplazan horizontalmente; no se comprimen
@@ -3517,8 +3553,8 @@ st.markdown(
     div[data-testid="stPlotlyChart"] .js-plotly-plot,
     div[data-testid="stPlotlyChart"] .plot-container,
     div[data-testid="stPlotlyChart"] .svg-container {{
-        height: min(58vh, 470px) !important;
-        min-height: 360px !important;
+        height: min(52vh, 400px) !important;
+        min-height: 340px !important;
     }}
 }}
 </style>
@@ -7114,10 +7150,21 @@ def aplicar_estilo_geografico(fig: go.Figure, altura: int = 720):
 
     fig.update_layout(
         height=altura,
-        margin=dict(t=70, l=10, r=10, b=10),
+        margin=dict(t=70, l=10, r=10, b=105),
         paper_bgcolor="rgba(255,255,255,0)",
         plot_bgcolor="rgba(255,255,255,0)",
         legend_title_text="Subdirección",
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.04,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+            bgcolor="rgba(255,255,255,0.86)",
+            bordercolor=COLOR_LINEA_MAPA_35,
+            borderwidth=1,
+        ),
         font=dict(size=14),
         geo=dict(bgcolor="rgba(255,255,255,0)"),
     )
@@ -7626,7 +7673,15 @@ def construir_mapa_estados_mexico(
 
     aplicar_estilo_geografico(fig, altura=720)
     fig.update_layout(
-        title=f"Mapa político de México con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
+        title=dict(
+            text=(
+                "Mapa político de México con sucursales por Subdirección"
+                f"<br><sup>{nombre_valera} · {fecha_texto}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+            font=dict(size=17),
+        ),
     )
 
     evento = None
@@ -7644,9 +7699,14 @@ def construir_mapa_estados_mexico(
             use_container_width=True,
             on_select="rerun",
             selection_mode="points",
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
         )
     except TypeError:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+        )
 
     if evento:
         try:
@@ -7733,7 +7793,15 @@ def construir_mapa_estados_peru(
 
     aplicar_estilo_geografico(fig, altura=720)
     fig.update_layout(
-        title=f"Mapa político de Perú con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
+        title=dict(
+            text=(
+                "Mapa político de Perú con sucursales por Subdirección"
+                f"<br><sup>{nombre_valera} · {fecha_texto}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+            font=dict(size=17),
+        ),
     )
 
     evento = None
@@ -7751,9 +7819,14 @@ def construir_mapa_estados_peru(
             use_container_width=True,
             on_select="rerun",
             selection_mode="points",
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
         )
     except TypeError:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+        )
 
     if evento:
         try:
@@ -7956,10 +8029,22 @@ def construir_mapa_estado_burbujas(
     aplicar_estilo_geografico(fig, altura=720)
 
     fig.update_layout(
-        title=f"{estado} - {titulo_division} con sucursales por Subdirección - {nombre_valera} - {fecha_texto}",
+        title=dict(
+            text=(
+                f"{estado} · {titulo_division} con sucursales"
+                f"<br><sup>{nombre_valera} · {fecha_texto}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+            font=dict(size=17),
+        ),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+    )
 
 
 def texto_guia_interaccion_mapa_financiero() -> str:
@@ -8911,7 +8996,13 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
                     [0.5, "#FEE08B"],
                     [1.0, "#1A9850"],
                 ],
-                colorbar=dict(title="Tasa ganancia"),
+                colorbar=dict(
+                    title="Tasa ganancia",
+                    thickness=12,
+                    len=0.62,
+                    x=1.01,
+                    tickfont=dict(size=10),
+                ),
                 line=dict(width=1.5, color="rgba(255,255,255,0.65)"),
             ),
             text=textos_nodos,
@@ -9073,6 +9164,7 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
             key=chart_key,
             on_select="rerun",
             selection_mode="points",
+            config={"displayModeBar": False, "responsive": True},
         )
         nuevo_node_id = resolver_node_id_desde_evento(evento)
         if nuevo_node_id and nuevo_node_id != st.session_state.get(selection_key):
@@ -9115,7 +9207,11 @@ def renderizar_treemap_plazo_con_click(fig: go.Figure, estado: str, selection_ke
                 f"Detalle: {e}"
             )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": True},
+    )
     return st.session_state.get(selection_key)
 
 
@@ -9174,9 +9270,17 @@ def construir_mapa_estado_plazo_composicion(
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
     fig.update_layout(
-        title=f"{estado} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}{titulo_plazo}",
+        title=dict(
+            text=(
+                f"{estado} · Plazo y composición"
+                f"<br><sup>{nombre_valera} · {titulo_corte}{titulo_plazo}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+            font=dict(size=17),
+        ),
         height=720,
-        margin=dict(l=10, r=10, t=70, b=10),
+        margin=dict(l=8, r=20, t=76, b=18),
         paper_bgcolor="rgba(255,255,255,0)",
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
@@ -9256,9 +9360,17 @@ def construir_mapa_subdireccion_plazo_composicion(
     titulo_plazo = "" if plazo_texto == "Todos" else f" - {plazo_texto}"
 
     fig.update_layout(
-        title=f"{subdireccion} - Plazo y composición por estructura - {nombre_valera} - {titulo_corte}{titulo_plazo}",
+        title=dict(
+            text=(
+                f"{subdireccion} · Plazo y composición"
+                f"<br><sup>{nombre_valera} · {titulo_corte}{titulo_plazo}</sup>"
+            ),
+            x=0.5,
+            xanchor="center",
+            font=dict(size=17),
+        ),
         height=720,
-        margin=dict(l=10, r=10, t=70, b=10),
+        margin=dict(l=8, r=20, t=76, b=18),
         paper_bgcolor="rgba(255,255,255,0)",
         plot_bgcolor="rgba(255,255,255,0)",
         font=dict(color=COLOR_TEXTO),
