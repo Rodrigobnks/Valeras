@@ -5173,6 +5173,96 @@ def _agrupar_chatbot_local(
     return resultado
 
 
+def _agrupar_plazo_chatbot_local(
+    df_contexto: pd.DataFrame | None,
+    nombre_valera: str,
+    nivel: str,
+) -> pd.DataFrame:
+    """Prepara métricas financieras de Plazo y composición para rankings del chat."""
+    ruta = resolver_archivo_plazo_composicion(
+        marca_objetivo=limpiar_texto(nombre_valera)
+    )
+    if ruta is None:
+        return pd.DataFrame()
+
+    try:
+        base = cargar_plazo_composicion(str(ruta))
+    except Exception:
+        return pd.DataFrame()
+
+    if base.empty or nivel not in base.columns:
+        return pd.DataFrame()
+
+    base = filtrar_ultimo_corte_plazo(base)
+
+    # Conserva la marca y el alcance territorial activos en el tablero.
+    marcas_activas = {normalizar_llave(nombre_valera)}
+    if df_contexto is not None and not df_contexto.empty:
+        for col_marca in ["Marca", "Cartera"]:
+            if col_marca in df_contexto.columns:
+                marcas_activas.update(
+                    normalizar_llave(x)
+                    for x in df_contexto[col_marca].dropna().astype(str)
+                    if normalizar_llave(x)
+                )
+
+        for col, normalizador in [
+            ("Subdirección", normalizar_llave),
+            ("Zona", normalizar_llave),
+            ("Sucursal", normalizar_llave_sucursal),
+        ]:
+            if col in base.columns and col in df_contexto.columns:
+                permitidos = {
+                    normalizador(x)
+                    for x in df_contexto[col].dropna().astype(str)
+                    if normalizador(x)
+                }
+                if permitidos:
+                    base = base[
+                        base[col].astype(str).map(normalizador).isin(permitidos)
+                    ].copy()
+
+    if "__Marca_norm" in base.columns and marcas_activas:
+        coincidencias_marca = base["__Marca_norm"].isin(marcas_activas)
+        if coincidencias_marca.any():
+            base = base[coincidencias_marca].copy()
+
+    if base.empty:
+        return pd.DataFrame()
+
+    for col in ["Capital", "Interes", "Total", "Vales"]:
+        base[col] = pd.to_numeric(base[col], errors="coerce").fillna(0)
+
+    resultado = (
+        base.groupby(nivel, as_index=False)
+        .agg(
+            Capital=("Capital", "sum"),
+            Interes=("Interes", "sum"),
+            Total_Financiero=("Total", "sum"),
+            Vales=("Vales", "sum"),
+        )
+        .rename(columns={"Total_Financiero": "Total Financiero"})
+    )
+    resultado["Ganancia"] = resultado["Total Financiero"] - resultado["Capital"]
+    resultado["Tasa de Ganancia"] = resultado.apply(
+        lambda fila: (
+            float(fila["Interes"]) / float(fila["Capital"]) * 100
+            if float(fila["Capital"])
+            else 0.0
+        ),
+        axis=1,
+    )
+    resultado["Monto Promedio por Vale"] = resultado.apply(
+        lambda fila: (
+            float(fila["Capital"]) / float(fila["Vales"])
+            if float(fila["Vales"])
+            else 0.0
+        ),
+        axis=1,
+    )
+    return resultado
+
+
 def _normalizar_entidad_chatbot(valor: str) -> str:
     """
     Normaliza nombres territoriales para reconocer variantes como:
@@ -5329,6 +5419,14 @@ def _resolver_variable_ranking_chatbot(
     texto = limpiar_texto(pregunta)
 
     aliases = {
+        "TASA DE GANANCIA": "Tasa de Ganancia",
+        "TASA GANANCIA": "Tasa de Ganancia",
+        "MONTO PROMEDIO POR VALE": "Monto Promedio por Vale",
+        "TOTAL FINANCIERO": "Total Financiero",
+        "GANANCIA": "Ganancia",
+        "CAPITAL": "Capital",
+        "INTERES": "Interes",
+        "VALES": "Vales",
         "DISPERSION DEL DIA": "Total Dispersado Fecha Corte",
         "DISPERSADO DEL DIA": "Total Dispersado Fecha Corte",
         "DISPERSION ACUMULADA": "Total Dispersado",
@@ -5381,7 +5479,7 @@ def _formatear_variable_ranking_chatbot(columna: str, valor: float) -> str:
         x in nombre
         for x in [
             "DISPERSADO", "CARTERA", "COLOCADO", "MORA", "CAPITAL",
-            "INTERES", "MONTO", "CANJE PROMEDIO", "TOTAL FINANCIERO",
+            "INTERES", "GANANCIA", "MONTO", "CANJE PROMEDIO", "TOTAL FINANCIERO",
         ]
     ) and "DISTRIBUIDORAS EN MORA" not in nombre:
         return _formato_chat_moneda(valor)
@@ -5620,12 +5718,30 @@ def _obtener_respuesta_chatbot_vales(
     if solicitud_ranking:
         sentido, cantidad = solicitud_ranking
         columna_ranking = _resolver_variable_ranking_chatbot(pregunta, tabla)
+        tabla_ranking = tabla
+
+        # Si la métrica pertenece a Plazo y composición, cambia a esa base y
+        # recalcula porcentajes ponderados al nivel pedido (sucursal/zona/subdirección).
+        if columna_ranking is None:
+            tabla_financiera = _agrupar_plazo_chatbot_local(
+                df_contexto=df_contexto,
+                nombre_valera=nombre_valera,
+                nivel=nivel,
+            )
+            columna_financiera = _resolver_variable_ranking_chatbot(
+                pregunta,
+                tabla_financiera,
+            )
+            if columna_financiera is not None:
+                tabla_ranking = tabla_financiera
+                columna_ranking = columna_financiera
+
         if columna_ranking is None:
             metricas_disponibles = [
                 columna
-                for columna in tabla.columns
+                for columna in tabla_ranking.columns
                 if columna != nivel
-                and pd.to_numeric(tabla[columna], errors="coerce").notna().any()
+                and pd.to_numeric(tabla_ranking[columna], errors="coerce").notna().any()
             ]
             muestra = ", ".join(f"**{m}**" for m in metricas_disponibles[:12])
             return (
@@ -5635,7 +5751,7 @@ def _obtener_respuesta_chatbot_vales(
                 f"Variables disponibles en esta vista: {muestra}."
             )
         return _respuesta_ranking_chatbot(
-            tabla=tabla,
+            tabla=tabla_ranking,
             nivel=nivel,
             columna=columna_ranking,
             sentido=sentido,
