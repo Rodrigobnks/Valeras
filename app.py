@@ -5564,17 +5564,53 @@ def _fila_chatbot(
 
 
 def _detectar_solicitud_ranking_chatbot(pregunta: str) -> tuple[str, int] | None:
-    """Devuelve (sentido, cantidad) para expresiones Top/Bottom de cualquier N."""
+    """Detecta rankings escritos como Top/Bottom o en lenguaje natural."""
     texto = limpiar_texto(pregunta)
+
+    # Forma explícita: top 5, bottom 10, top de 15, etc.
     coincidencia = re.search(r"\b(TOP|BOTTOM)\s*(?:DE\s*)?(\d+)?\b", texto)
-    if not coincidencia:
+    if coincidencia:
+        sentido = "bottom" if coincidencia.group(1) == "BOTTOM" else "top"
+        cantidad = int(coincidencia.group(2) or 10)
+        return sentido, max(1, min(cantidad, 500))
+
+    # Formas naturales: "las 5 mejores", "10 peores", "5 con más",
+    # "las 15 de mayor..." o "5 con menos".
+    numero = re.search(r"\b(\d{1,3})\b", texto)
+    if not numero:
         return None
 
-    sentido = "bottom" if coincidencia.group(1) == "BOTTOM" else "top"
-    cantidad = int(coincidencia.group(2) or 10)
-    # Evita respuestas gigantes por error de captura, sin limitar los rangos normales.
-    cantidad = max(1, min(cantidad, 500))
-    return sentido, cantidad
+    cantidad = int(numero.group(1))
+
+    pistas_top = [
+        r"\bMEJORES?\b",
+        r"\bCON MAS\b",
+        r"\bDE MAYOR\b",
+        r"\bMAYORES?\b",
+        r"\bMAS ALT(?:A|AS|O|OS)\b",
+    ]
+    pistas_bottom = [
+        r"\bPEORES?\b",
+        r"\bCON MENOS\b",
+        r"\bDE MENOR\b",
+        r"\bMENORES?\b",
+        r"\bMAS BAJ(?:A|AS|O|OS)\b",
+    ]
+
+    # "Con más/menos" o "de mayor/menor" expresa directamente el orden
+    # de la métrica y tiene prioridad sobre palabras generales como mejores.
+    if re.search(r"\b(?:CON MENOS|DE MENOR|MAS BAJ(?:A|AS|O|OS))\b", texto):
+        sentido = "bottom"
+    elif re.search(r"\b(?:CON MAS|DE MAYOR|MAS ALT(?:A|AS|O|OS))\b", texto):
+        sentido = "top"
+    elif any(re.search(patron, texto) for patron in pistas_bottom):
+        sentido = "bottom"
+    elif any(re.search(patron, texto) for patron in pistas_top):
+        sentido = "top"
+    else:
+        return None
+
+    return sentido, max(1, min(cantidad, 500))
 
 
 def _resolver_variable_ranking_chatbot(
