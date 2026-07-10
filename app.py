@@ -3360,6 +3360,12 @@ st.markdown(
     font-weight: 900;
 }}
 
+/* La copia de controles ubicada después de la gráfica de pastel sólo se
+   muestra en teléfono. */
+.st-key-controles_mapa_mobile {{
+    display: none;
+}}
+
 @media (max-width: 900px) {{
     .ai-grid,
     .ai-guide {{
@@ -3448,15 +3454,14 @@ st.markdown(
     div[data-testid="stPlotlyChart"] {{
         width: 100% !important;
         max-width: 100% !important;
-        overflow: hidden !important;
+        overflow: visible !important;
     }}
 
     div[data-testid="stPlotlyChart"] .js-plotly-plot,
     div[data-testid="stPlotlyChart"] .plot-container,
     div[data-testid="stPlotlyChart"] .svg-container {{
         width: 100% !important;
-        height: min(52vh, 440px) !important;
-        min-height: 350px !important;
+        max-width: 100% !important;
     }}
 
     div[data-testid="stPlotlyChart"] .modebar-container {{
@@ -3537,6 +3542,21 @@ st.markdown(
         font-size: 13px !important;
     }}
 
+    .st-key-controles_mapa_escritorio {{
+        display: none !important;
+    }}
+
+    .st-key-controles_mapa_mobile {{
+        display: block !important;
+        width: 100%;
+        margin: 8px 0 14px 0;
+        padding: 10px;
+        border: 1px solid rgba(11,42,111,0.12);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.96);
+        box-sizing: border-box;
+    }}
+
     div[data-testid="stDialog"] div[role="dialog"] {{
         width: calc(100vw - 16px) !important;
         max-width: calc(100vw - 16px) !important;
@@ -3550,12 +3570,6 @@ st.markdown(
         grid-template-columns: 1fr;
     }}
 
-    div[data-testid="stPlotlyChart"] .js-plotly-plot,
-    div[data-testid="stPlotlyChart"] .plot-container,
-    div[data-testid="stPlotlyChart"] .svg-container {{
-        height: min(52vh, 400px) !important;
-        min-height: 340px !important;
-    }}
 }}
 </style>
 """,
@@ -3681,6 +3695,7 @@ def selector_tarjeta_desplegable(
     key: str,
     default: str,
     key_prefix: str,
+    sync_key: str | None = None,
 ) -> str:
     if key not in st.session_state or st.session_state[key] not in opciones:
         st.session_state[key] = default if default in opciones else opciones[0]
@@ -3689,6 +3704,8 @@ def selector_tarjeta_desplegable(
 
     def _seleccionar(valor):
         st.session_state[key] = valor
+        if sync_key:
+            st.session_state[sync_key] = valor
 
     if hasattr(st, "popover"):
         with st.popover(
@@ -7671,7 +7688,7 @@ def construir_mapa_estados_mexico(
         tipo_mapa=tipo_mapa,
     )
 
-    aplicar_estilo_geografico(fig, altura=720)
+    aplicar_estilo_geografico(fig, altura=520)
     fig.update_layout(
         title=dict(
             text=(
@@ -7791,7 +7808,7 @@ def construir_mapa_estados_peru(
         tipo_mapa=tipo_mapa,
     )
 
-    aplicar_estilo_geografico(fig, altura=720)
+    aplicar_estilo_geografico(fig, altura=520)
     fig.update_layout(
         title=dict(
             text=(
@@ -8026,7 +8043,7 @@ def construir_mapa_estado_burbujas(
         tipo_mapa=tipo_mapa,
     )
 
-    aplicar_estilo_geografico(fig, altura=720)
+    aplicar_estilo_geografico(fig, altura=520)
 
     fig.update_layout(
         title=dict(
@@ -9014,6 +9031,14 @@ def construir_treemap_plazo_composicion(df_suc: pd.DataFrame, estado: str, selec
             hoverinfo="none",
             hovertemplate=None,
             maxdepth=4,
+            pathbar=dict(
+                visible=True,
+                edgeshape=">",
+                thickness=28,
+                textfont=dict(size=12),
+            ),
+            tiling=dict(packing="squarify", pad=3),
+            root=dict(color="rgba(235,241,252,0.92)"),
         )
     )
 
@@ -9702,44 +9727,45 @@ def mostrar_mapa(valera_param: str):
 
     if mostrar_botones_tipo_mapa:
         with columna_lateral_mapa:
-            st.markdown(
-                "<div style='height:455px;'></div>",
-                unsafe_allow_html=True,
-            )
-
-            renderizar_guia_interaccion_mapa(
-                st.session_state.get(
-                    "tipo_mapa_valeras",
-                    "Subdirección",
+            with st.container(key="controles_mapa_escritorio"):
+                st.markdown(
+                    "<div style='height:455px;'></div>",
+                    unsafe_allow_html=True,
                 )
-            )
 
-            tipo_mapa = selector_tarjeta_desplegable(
-                titulo="Tipo de mapa",
-                valor_visible=st.session_state.get(
-                    "tipo_mapa_valeras",
-                    "Subdirección",
-                ),
-                opciones=["Subdirección", "Calor Canjes"],
-                key="tipo_mapa_valeras",
-                default="Subdirección",
-                key_prefix="selector_tipo_mapa",
-            )
+                renderizar_guia_interaccion_mapa(
+                    st.session_state.get(
+                        "tipo_mapa_valeras",
+                        "Subdirección",
+                    )
+                )
 
-            variable_tamano = selector_tarjeta_desplegable(
-                titulo="Tamaño de bolita",
-                valor_visible=st.session_state.get(
-                    "variable_tamano",
-                    "Distribuidoras Totales",
-                ),
-                opciones=[
-                    "Distribuidoras Totales",
-                    "Distribuidoras en Mora",
-                ],
-                key="variable_tamano",
-                default="Distribuidoras Totales",
-                key_prefix="selector_tamano_bolita",
-            )
+                tipo_mapa = selector_tarjeta_desplegable(
+                    titulo="Tipo de mapa",
+                    valor_visible=st.session_state.get(
+                        "tipo_mapa_valeras",
+                        "Subdirección",
+                    ),
+                    opciones=["Subdirección", "Calor Canjes"],
+                    key="tipo_mapa_valeras",
+                    default="Subdirección",
+                    key_prefix="selector_tipo_mapa",
+                )
+
+                variable_tamano = selector_tarjeta_desplegable(
+                    titulo="Tamaño de bolita",
+                    valor_visible=st.session_state.get(
+                        "variable_tamano",
+                        "Distribuidoras Totales",
+                    ),
+                    opciones=[
+                        "Distribuidoras Totales",
+                        "Distribuidoras en Mora",
+                    ],
+                    key="variable_tamano",
+                    default="Distribuidoras Totales",
+                    key_prefix="selector_tamano_bolita",
+                )
     else:
         tipo_mapa = st.session_state.get(
             "tipo_mapa_valeras",
@@ -9819,6 +9845,44 @@ def mostrar_mapa(valera_param: str):
             nombre_valera=nombre_valera,
             df_resumen_base=df_resumen_base,
         )
+
+        # En teléfono estos controles aparecen inmediatamente después de la
+        # gráfica de pastel. En escritorio se conserva la columna lateral.
+        if mostrar_botones_tipo_mapa:
+            st.session_state["tipo_mapa_valeras_mobile"] = st.session_state.get(
+                "tipo_mapa_valeras",
+                "Subdirección",
+            )
+            st.session_state["variable_tamano_mobile"] = st.session_state.get(
+                "variable_tamano",
+                "Distribuidoras Totales",
+            )
+
+            with st.container(key="controles_mapa_mobile"):
+                col_tipo_mobile, col_tamano_mobile = st.columns(2, gap="small")
+                with col_tipo_mobile:
+                    selector_tarjeta_desplegable(
+                        titulo="Tipo de mapa",
+                        valor_visible=st.session_state["tipo_mapa_valeras_mobile"],
+                        opciones=["Subdirección", "Calor Canjes"],
+                        key="tipo_mapa_valeras_mobile",
+                        default="Subdirección",
+                        key_prefix="selector_tipo_mapa_mobile",
+                        sync_key="tipo_mapa_valeras",
+                    )
+                with col_tamano_mobile:
+                    selector_tarjeta_desplegable(
+                        titulo="Tamaño de bolita",
+                        valor_visible=st.session_state["variable_tamano_mobile"],
+                        opciones=[
+                            "Distribuidoras Totales",
+                            "Distribuidoras en Mora",
+                        ],
+                        key="variable_tamano_mobile",
+                        default="Distribuidoras Totales",
+                        key_prefix="selector_tamano_bolita_mobile",
+                        sync_key="variable_tamano",
+                    )
 
         if subdireccion_sel and (es_mexico or es_peru):
             nombre_pais_volver = "México" if es_mexico else "Perú"
