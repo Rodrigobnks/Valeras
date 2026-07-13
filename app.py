@@ -9827,46 +9827,29 @@ def mostrar_mapa(valera_param: str):
 <div class="kpi-grid">
     <div class="kpi-card">
         <div class="kpi-label">Dispersado acumulado</div>
-        <div class="kpi-value">
-            {formato_moneda(total_dispersado_acum)}
-        </div>
+        <div class="kpi-value">{formato_moneda(total_dispersado_acum)}</div>
     </div>
-
     <div class="kpi-card">
         <div class="kpi-label">Canjes acumulados</div>
-        <div class="kpi-value">
-            {formato_numero(total_canjes_acum)}
-        </div>
+        <div class="kpi-value">{formato_numero(total_canjes_acum)}</div>
     </div>
-
     <div class="kpi-card">
         <div class="kpi-label">Canje promedio acumulado</div>
-        <div class="kpi-value">
-            {formato_moneda(canje_promedio_acum)}
-        </div>
+        <div class="kpi-value">{formato_moneda(canje_promedio_acum)}</div>
     </div>
-
     <div class="kpi-card">
         <div class="kpi-label">Monto PP acumulado</div>
-        <div class="kpi-value">
-            {formato_moneda(monto_pp_acumulado)}
-        </div>
+        <div class="kpi-value">{formato_moneda(monto_pp_acumulado)}</div>
     </div>
 </div>
-
 <div class="kpi-grid">
     <div class="kpi-card">
         <div class="kpi-label">PP promedio acumulado</div>
-        <div class="kpi-value">
-            {formato_moneda(pp_promedio_acumulado)}
-        </div>
+        <div class="kpi-value">{formato_moneda(pp_promedio_acumulado)}</div>
     </div>
-
     <div class="kpi-card">
         <div class="kpi-label">Corte utilizado de dispersión</div>
-        <div class="kpi-value" style="font-size:24px;">
-            {fecha_corte_dispersion or "Sin fecha"}
-        </div>
+        <div class="kpi-value" style="font-size:24px;">{fecha_corte_dispersion or "Sin fecha"}</div>
     </div>
 </div>
 """,
