@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import json
+import os
 import re
 import unicodedata
 import urllib.request
@@ -10,6 +12,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 
 try:
@@ -1738,30 +1746,42 @@ def obtener_totales_dispersion_independientes(
     nombre_valera: str,
     incluir_sin_asignar: bool = True,
     df_contexto: pd.DataFrame | None = None,
-) -> tuple[float, float, float, str]:
+) -> tuple[float, float, float, float, float, str]:
     """
     Calcula las tarjetas generales directamente desde Dispersion diaria.csv.
 
+    Tarjetas calculadas:
+    - Dispersado acumulado: suma de Total Dispersado.
+    - Canjes acumulados: suma de Canjes.
+    - Canje promedio acumulado: Total Dispersado / Canjes.
+    - Monto PP acumulado: suma de Monto PP.
+    - PP promedio acumulado:
+        1. Monto PP / Prestamos Personales, cuando existe el conteo.
+        2. Promedio de PP Promedio, cuando no existe el conteo.
+
+    El cálculo:
     - No exige coincidencia contra Distribuidoras Vale MX.
-    - Usa el último corte disponible de dispersión menor o igual a la fecha
-      seleccionada.
-    - El acumulado considera todas las fechas hasta ese corte.
-    - En una vista de detalle puede respetar Subdirección, Zona y Sucursal
-      usando los valores visibles, sin hacer merge.
+    - Usa el último corte disponible menor o igual a la fecha seleccionada.
+    - Considera todas las fechas hasta ese corte.
+    - Respeta Subdirección, Zona y Sucursal en las vistas de detalle.
     """
     ruta_dispersion = resolver_archivo_dispersion()
+
     if ruta_dispersion is None:
-        return 0.0, 0.0, 0.0, ""
+        return 0.0, 0.0, 0.0, 0.0, 0.0, ""
 
     try:
-        df_disp = cargar_dispersion_diaria(str(ruta_dispersion)).copy()
+        df_disp = cargar_dispersion_diaria(
+            str(ruta_dispersion)
+        ).copy()
     except Exception:
-        return 0.0, 0.0, 0.0, ""
+        return 0.0, 0.0, 0.0, 0.0, 0.0, ""
 
     if df_disp.empty:
-        return 0.0, 0.0, 0.0, ""
+        return 0.0, 0.0, 0.0, 0.0, 0.0, ""
 
     marca_norm = limpiar_texto(nombre_valera)
+
     alias_marcas = {
         limpiar_texto("Vale Amigo"): {
             limpiar_texto("Vale Amigo"),
@@ -1781,15 +1801,25 @@ def obtener_totales_dispersion_independientes(
             limpiar_texto("Vale Amigo"),
         },
     }
-    marcas_validas = alias_marcas.get(marca_norm, {marca_norm})
+
+    marcas_validas = alias_marcas.get(
+        marca_norm,
+        {marca_norm},
+    )
 
     df_disp = df_disp[
-        df_disp["Marca"].map(limpiar_texto).isin(marcas_validas)
+        df_disp["Marca"]
+        .map(limpiar_texto)
+        .isin(marcas_validas)
     ].copy()
 
-    if not incluir_sin_asignar and "Subdirección" in df_disp.columns:
+    if (
+        not incluir_sin_asignar
+        and "Subdirección" in df_disp.columns
+    ):
         df_disp = df_disp[
-            ~df_disp["Subdirección"].map(es_subdireccion_sin_asignar)
+            ~df_disp["Subdirección"]
+            .map(es_subdireccion_sin_asignar)
         ].copy()
 
     fecha_objetivo = pd.to_datetime(
@@ -1799,7 +1829,7 @@ def obtener_totales_dispersion_independientes(
     )
 
     if pd.isna(fecha_objetivo) or df_disp.empty:
-        return 0.0, 0.0, 0.0, ""
+        return 0.0, 0.0, 0.0, 0.0, 0.0, ""
 
     fechas_disponibles = df_disp.loc[
         df_disp["Date"] <= fecha_objetivo,
@@ -1807,54 +1837,135 @@ def obtener_totales_dispersion_independientes(
     ].dropna()
 
     if fechas_disponibles.empty:
-        return 0.0, 0.0, 0.0, ""
+        return 0.0, 0.0, 0.0, 0.0, 0.0, ""
 
     fecha_dispersion = fechas_disponibles.max().normalize()
-    df_disp = df_disp[df_disp["Date"] <= fecha_dispersion].copy()
 
-    # En el mapa general no limita por la estructura, para no perder registros.
-    # En una vista de detalle conserva el alcance visible sin hacer un merge.
+    df_disp = df_disp[
+        df_disp["Date"] <= fecha_dispersion
+    ].copy()
+
+    # En la vista general no se limita por la estructura.
+    # En una vista de detalle se conserva el alcance territorial.
     if df_contexto is not None and not df_contexto.empty:
         for col in ["Subdirección", "Zona", "Sucursal"]:
-            if col not in df_contexto.columns or col not in df_disp.columns:
+            if (
+                col not in df_contexto.columns
+                or col not in df_disp.columns
+            ):
                 continue
 
+            normalizador = (
+                normalizar_llave_sucursal
+                if col == "Sucursal"
+                else normalizar_llave
+            )
+
             valores = {
-                limpiar_texto(x)
-                for x in df_contexto[col].dropna().astype(str).tolist()
-                if limpiar_texto(x)
+                normalizador(x)
+                for x in (
+                    df_contexto[col]
+                    .dropna()
+                    .astype(str)
+                    .tolist()
+                )
+                if normalizador(x)
             }
 
             if valores:
                 df_disp = df_disp[
-                    df_disp[col].map(limpiar_texto).isin(valores)
+                    df_disp[col]
+                    .map(normalizador)
+                    .isin(valores)
                 ].copy()
 
     total_dispersado = float(
         pd.to_numeric(
             df_disp.get("Total Dispersado", 0),
             errors="coerce",
-        ).fillna(0).sum()
+        )
+        .fillna(0)
+        .sum()
     )
+
     total_canjes = float(
         pd.to_numeric(
             df_disp.get("Canjes", 0),
             errors="coerce",
-        ).fillna(0).sum()
+        )
+        .fillna(0)
+        .sum()
     )
+
     canje_promedio = (
         total_dispersado / total_canjes
         if total_canjes
         else 0.0
     )
 
+    # ==================================================
+    # PRÉSTAMOS PERSONALES
+    # ==================================================
+    monto_pp_acumulado = 0.0
+    prestamos_personales_acumulados = 0.0
+    pp_promedio_acumulado = 0.0
+
+    if "Monto PP" in df_disp.columns:
+        monto_pp_acumulado = float(
+            pd.to_numeric(
+                df_disp["Monto PP"],
+                errors="coerce",
+            )
+            .fillna(0)
+            .sum()
+        )
+
+    if "Prestamos Personales" in df_disp.columns:
+        prestamos_personales_acumulados = float(
+            pd.to_numeric(
+                df_disp["Prestamos Personales"],
+                errors="coerce",
+            )
+            .fillna(0)
+            .sum()
+        )
+
+    # Cálculo acumulado equivalente a:
+    # Total Dispersado / Canjes.
+    if prestamos_personales_acumulados:
+        pp_promedio_acumulado = (
+            monto_pp_acumulado
+            / prestamos_personales_acumulados
+        )
+
+    # Si no existe un conteo de préstamos personales,
+    # usa directamente la columna PP Promedio.
+    elif "PP Promedio" in df_disp.columns:
+        serie_pp_promedio = pd.to_numeric(
+            df_disp["PP Promedio"],
+            errors="coerce",
+        )
+
+        # Excluye vacíos y ceros para no reducir artificialmente
+        # el promedio cuando una fila no tuvo préstamo personal.
+        serie_pp_promedio = serie_pp_promedio[
+            serie_pp_promedio.notna()
+            & (serie_pp_promedio != 0)
+        ]
+
+        if not serie_pp_promedio.empty:
+            pp_promedio_acumulado = float(
+                serie_pp_promedio.mean()
+            )
+
     return (
         total_dispersado,
         total_canjes,
         canje_promedio,
+        monto_pp_acumulado,
+        pp_promedio_acumulado,
         fecha_dispersion.strftime("%d/%m/%Y"),
     )
-
 
 def agregar_columnas_dispersion_vacias(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -4286,7 +4397,7 @@ def cargar_documento_interpretacion_negocio() -> str:
 def obtener_bloque_interpretacion(nombre_bloque: str, fallback: str = "") -> str:
     """Extrae un bloque [BLOQUE:NOMBRE] del documento de interpretación."""
     texto = cargar_documento_interpretacion_negocio()
-    patron = rf"\[BLOQUE:{re.escape(nombre_bloque)}\](.*?)\[/BLOQUE\]"
+    patron = rf"\[BLOQUE:{re.escape(nombre_bloque)}\\](.*?)\[/BLOQUE\]"
     match = re.search(patron, texto, flags=re.IGNORECASE | re.DOTALL)
     if match:
         bloque = re.sub(r"\s+", " ", match.group(1)).strip()
@@ -9676,6 +9787,8 @@ def mostrar_mapa(valera_param: str):
         total_dispersado_acum,
         total_canjes_acum,
         canje_promedio_acum,
+        monto_pp_acumulado,
+        pp_promedio_acumulado,
         fecha_corte_dispersion,
     ) = obtener_totales_dispersion_independientes(
         fecha_corte_texto=fecha_sel,
@@ -9714,15 +9827,46 @@ def mostrar_mapa(valera_param: str):
 <div class="kpi-grid">
     <div class="kpi-card">
         <div class="kpi-label">Dispersado acumulado</div>
-        <div class="kpi-value">{formato_moneda(total_dispersado_acum)}</div>
+        <div class="kpi-value">
+            {formato_moneda(total_dispersado_acum)}
+        </div>
     </div>
+
     <div class="kpi-card">
         <div class="kpi-label">Canjes acumulados</div>
-        <div class="kpi-value">{formato_numero(total_canjes_acum)}</div>
+        <div class="kpi-value">
+            {formato_numero(total_canjes_acum)}
+        </div>
     </div>
+
     <div class="kpi-card">
         <div class="kpi-label">Canje promedio acumulado</div>
-        <div class="kpi-value">{formato_moneda(canje_promedio_acum)}</div>
+        <div class="kpi-value">
+            {formato_moneda(canje_promedio_acum)}
+        </div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-label">Monto PP acumulado</div>
+        <div class="kpi-value">
+            {formato_moneda(monto_pp_acumulado)}
+        </div>
+    </div>
+</div>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">PP promedio acumulado</div>
+        <div class="kpi-value">
+            {formato_moneda(pp_promedio_acumulado)}
+        </div>
+    </div>
+
+    <div class="kpi-card">
+        <div class="kpi-label">Corte utilizado de dispersión</div>
+        <div class="kpi-value" style="font-size:24px;">
+            {fecha_corte_dispersion or "Sin fecha"}
+        </div>
     </div>
 </div>
 """,
