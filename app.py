@@ -5450,6 +5450,129 @@ def _agrupar_chatbot_local(
     return resultado
 
 
+def _agrupar_pp_chatbot_local(
+    df_contexto: pd.DataFrame | None,
+    nombre_valera: str,
+    fecha_sel: str,
+    nivel: str,
+) -> pd.DataFrame:
+    """Agrupa Monto PP, préstamos personales y PP promedio para el chatbot."""
+    ruta = resolver_archivo_dispersion()
+    if ruta is None:
+        return pd.DataFrame()
+
+    try:
+        base = cargar_dispersion_diaria(str(ruta)).copy()
+    except Exception:
+        return pd.DataFrame()
+
+    if base.empty or nivel not in base.columns:
+        return pd.DataFrame()
+
+    marca_norm = limpiar_texto(nombre_valera)
+    alias_marcas = {
+        limpiar_texto("Vale Amigo"): {limpiar_texto("Vale Amigo")},
+        limpiar_texto("Viva Vale"): {limpiar_texto("Viva Vale")},
+        limpiar_texto("Rapivale"): {
+            limpiar_texto("Rapivale"),
+            limpiar_texto("RapiVale"),
+        },
+        limpiar_texto("Vale Amigo Perú"): {
+            limpiar_texto("Vale Amigo Perú"),
+            limpiar_texto("Vale Amigo Peru"),
+            limpiar_texto("Vale Perú"),
+            limpiar_texto("Vale Peru"),
+            limpiar_texto("Vale Amigo"),
+        },
+    }
+    marcas_validas = alias_marcas.get(marca_norm, {marca_norm})
+    base = base[
+        base["Marca"].map(limpiar_texto).isin(marcas_validas)
+    ].copy()
+
+    fecha_objetivo = pd.to_datetime(
+        fecha_sel,
+        errors="coerce",
+        dayfirst=True,
+    )
+    if pd.isna(fecha_objetivo):
+        fecha_objetivo = base["Date"].max()
+
+    fechas_validas = base.loc[
+        base["Date"] <= fecha_objetivo,
+        "Date",
+    ].dropna()
+    if fechas_validas.empty:
+        return pd.DataFrame()
+
+    fecha_usada = fechas_validas.max().normalize()
+    base = base[base["Date"] <= fecha_usada].copy()
+
+    # Mantiene exactamente el alcance territorial visible en el tablero.
+    if df_contexto is not None and not df_contexto.empty:
+        normalizadores = {
+            "Subdirección": normalizar_llave,
+            "Zona": normalizar_llave,
+            "Sucursal": normalizar_llave_sucursal,
+        }
+        for columna, normalizador in normalizadores.items():
+            if columna not in base.columns or columna not in df_contexto.columns:
+                continue
+            permitidos = {
+                normalizador(valor)
+                for valor in df_contexto[columna].dropna().astype(str)
+                if normalizador(valor)
+            }
+            if permitidos:
+                base = base[
+                    base[columna].map(normalizador).isin(permitidos)
+                ].copy()
+
+    if base.empty:
+        return pd.DataFrame()
+
+    for columna in ["Monto PP", "Prestamos Personales", "PP Promedio"]:
+        if columna not in base.columns:
+            base[columna] = 0
+        base[columna] = pd.to_numeric(base[columna], errors="coerce").fillna(0)
+
+    resultado = (
+        base.groupby(nivel, as_index=False)
+        .agg(
+            Monto_PP=("Monto PP", "sum"),
+            Prestamos_Personales=("Prestamos Personales", "sum"),
+            PP_Promedio_Fuente=(
+                "PP Promedio",
+                lambda serie: serie[serie != 0].mean() if (serie != 0).any() else 0,
+            ),
+        )
+        .rename(
+            columns={
+                "Monto_PP": "Monto PP",
+                "Prestamos_Personales": "Prestamos Personales",
+            }
+        )
+    )
+    resultado["PP Promedio"] = resultado.apply(
+        lambda fila: (
+            float(fila["Monto PP"]) / float(fila["Prestamos Personales"])
+            if float(fila["Prestamos Personales"])
+            else float(fila["PP_Promedio_Fuente"])
+        ),
+        axis=1,
+    )
+    resultado = resultado.drop(columns=["PP_Promedio_Fuente"])
+
+    # Evita que los rankings Bottom se llenen con sucursales sin operación PP.
+    resultado = resultado[
+        (resultado["Monto PP"] != 0)
+        | (resultado["Prestamos Personales"] != 0)
+        | (resultado["PP Promedio"] != 0)
+    ].copy()
+    resultado["Corte Dispersión"] = fecha_usada.strftime("%d/%m/%Y")
+    return resultado
+
+
 def _agrupar_plazo_chatbot_local(
     df_contexto: pd.DataFrame | None,
     nombre_valera: str,
@@ -5695,7 +5818,8 @@ def _detectar_solicitud_ranking_chatbot(pregunta: str) -> tuple[str, int] | None
     metricas_explicitas = [
         "CAPITAL", "INTERES", "GANANCIA", "DISTRIBUIDORA", "DISPERSION",
         "DISPERSADO", "CANJE", "CALIDAD", "MORA", "CLIENTE", "COLOCADO",
-        "CARTERA", "VALES", "TASA",
+        "CARTERA", "VALES", "TASA", "MONTO PP", "PP PROMEDIO",
+        "PRESTAMO PERSONAL",
     ]
     if numero:
         cantidad = int(numero.group(1))
@@ -5743,6 +5867,17 @@ def _resolver_variable_ranking_chatbot(
     texto = limpiar_texto(pregunta)
 
     aliases = {
+        "MONTO PP ACUMULADO": "Monto PP",
+        "MONTO PP DISPERSADO": "Monto PP",
+        "TOTAL MONTO PP": "Monto PP",
+        "TOTAL PP": "Monto PP",
+        "MONTO PP": "Monto PP",
+        "PP PROMEDIO": "PP Promedio",
+        "PROMEDIO PP": "PP Promedio",
+        "PRESTAMO PERSONAL PROMEDIO": "PP Promedio",
+        "TICKET PP": "PP Promedio",
+        "PRESTAMOS PERSONALES": "Prestamos Personales",
+        "NUMERO DE PP": "Prestamos Personales",
         "TASA DE GANANCIA": "Tasa de Ganancia",
         "TASA GANANCIA": "Tasa de Ganancia",
         "MONTO PROMEDIO POR VALE": "Monto Promedio por Vale",
@@ -5805,7 +5940,8 @@ def _formatear_variable_ranking_chatbot(columna: str, valor: float) -> str:
         x in nombre
         for x in [
             "DISPERSADO", "CARTERA", "COLOCADO", "MORA", "CAPITAL",
-            "INTERES", "GANANCIA", "MONTO", "CANJE PROMEDIO", "TOTAL FINANCIERO",
+            "INTERES", "GANANCIA", "MONTO", "CANJE PROMEDIO", "PP PROMEDIO",
+            "TOTAL FINANCIERO",
         ]
     ) and "DISTRIBUIDORAS EN MORA" not in nombre:
         return _formato_chat_moneda(valor)
@@ -5972,6 +6108,46 @@ def _respuesta_comparacion_local(
     return "\n".join(lineas)
 
 
+def _respuesta_comparacion_metrica_local(
+    tabla: pd.DataFrame,
+    nivel: str,
+    nombres: list[str],
+    columna: str,
+) -> str:
+    """Compara dos entidades para una métrica numérica elegida por el usuario."""
+    if len(nombres) < 2:
+        return (
+            "No pude identificar dos entidades válidas para la comparación. "
+            f"Ejemplo: **Compara monto PP de dos {nivel.lower()}es**."
+        )
+
+    filas = []
+    for nombre in nombres[:2]:
+        coincidencia = tabla[
+            tabla[nivel].astype(str).map(_normalizar_entidad_chatbot)
+            == _normalizar_entidad_chatbot(nombre)
+        ]
+        if not coincidencia.empty:
+            filas.append(coincidencia.iloc[0])
+
+    if len(filas) < 2:
+        return "No encontré ambas entidades dentro del alcance PP activo."
+
+    a, b = filas
+    valor_a = float(a.get(columna, 0))
+    valor_b = float(b.get(columna, 0))
+    diferencia = abs(valor_a - valor_b)
+    lider = a[nivel] if valor_a >= valor_b else b[nivel]
+    return (
+        f"Comparación de **{columna}**: **{a[nivel]}** registra "
+        f"**{_formatear_variable_ranking_chatbot(columna, valor_a)}** y "
+        f"**{b[nivel]}** registra "
+        f"**{_formatear_variable_ranking_chatbot(columna, valor_b)}**. "
+        f"La diferencia es **{_formatear_variable_ranking_chatbot(columna, diferencia)}**; "
+        f"**{lider}** presenta el valor más alto."
+    )
+
+
 def _obtener_respuesta_chatbot_vales(
     pregunta: str,
     df_contexto: pd.DataFrame | None,
@@ -6017,7 +6193,8 @@ def _obtener_respuesta_chatbot_vales(
         if catalogo_reglas.empty:
             return (
                 "Puedo responder preguntas locales sobre mora, calidad, distribuidoras, "
-                "dispersión, canjes, comparaciones, categorías y prioridad de atención. "
+                "dispersión, canjes, Monto PP, PP Promedio, comparaciones, categorías "
+                "y prioridad de atención. "
                 "No encontré el archivo Catalogo_completo_reglas_chatbot_valeras.xlsx, "
                 "por lo que estoy usando únicamente las reglas internas."
             )
@@ -6046,6 +6223,23 @@ def _obtener_respuesta_chatbot_vales(
         columna_ranking = _resolver_variable_ranking_chatbot(pregunta, tabla)
         tabla_ranking = tabla
 
+        # Monto PP y PP Promedio viven en Dispersión diaria, no en la tabla
+        # principal de estructura. Se cargan con el mismo corte y filtros activos.
+        if columna_ranking is None:
+            tabla_pp = _agrupar_pp_chatbot_local(
+                df_contexto=df_contexto,
+                nombre_valera=nombre_valera,
+                fecha_sel=fecha_sel,
+                nivel=nivel,
+            )
+            columna_pp = _resolver_variable_ranking_chatbot(
+                pregunta,
+                tabla_pp,
+            )
+            if columna_pp is not None:
+                tabla_ranking = tabla_pp
+                columna_ranking = columna_pp
+
         # Si la métrica pertenece a Plazo y composición, cambia a esa base y
         # recalcula porcentajes ponderados al nivel pedido (sucursal/zona/subdirección).
         if columna_ranking is None:
@@ -6072,8 +6266,9 @@ def _obtener_respuesta_chatbot_vales(
             muestra = ", ".join(f"**{m}**" for m in metricas_disponibles[:12])
             return (
                 "Entendí el rango solicitado, pero no identifiqué la variable. "
-                f"Puedes pedir, por ejemplo, **top {cantidad} de dispersión** o "
-                f"**bottom {cantidad} de calidad de cartera**. "
+                f"Puedes pedir, por ejemplo, **top {cantidad} de monto PP**, "
+                f"**top {cantidad} de PP promedio**, **top {cantidad} de dispersión** "
+                f"o **bottom {cantidad} de calidad de cartera**. "
                 f"Variables disponibles en esta vista: {muestra}."
             )
         return _respuesta_ranking_chatbot(
@@ -6102,6 +6297,25 @@ def _obtener_respuesta_chatbot_vales(
         x in pregunta_norm
         for x in ["COMPARA", "COMPARACION", "CONTRA", "VERSUS", " VS "]
     ):
+        if any(
+            x in pregunta_norm
+            for x in ["MONTO PP", "PP PROMEDIO", "PROMEDIO PP", "PRESTAMO PERSONAL"]
+        ):
+            tabla_pp = _agrupar_pp_chatbot_local(
+                df_contexto=df_contexto,
+                nombre_valera=nombre_valera,
+                fecha_sel=fecha_sel,
+                nivel=nivel,
+            )
+            columna_pp = _resolver_variable_ranking_chatbot(pregunta, tabla_pp)
+            nombres_pp = _buscar_entidades_en_pregunta(pregunta, tabla_pp, nivel)
+            if columna_pp is not None:
+                return _respuesta_comparacion_metrica_local(
+                    tabla=tabla_pp,
+                    nivel=nivel,
+                    nombres=nombres_pp,
+                    columna=columna_pp,
+                )
         return _respuesta_comparacion_local(tabla, nivel, nombres)
 
     # Conteos de estructura definidos en el catálogo.
@@ -6155,6 +6369,102 @@ def _obtener_respuesta_chatbot_vales(
         ).strip()
         if plantilla:
             return plantilla
+
+    # Monto PP, préstamos personales y PP Promedio.
+    intenciones_pp = {
+        "monto_pp_acumulado",
+        "mayor_monto_pp_dispersion",
+        "menor_monto_pp_dispersion",
+        "mayor_prestamos_personales",
+        "menor_prestamos_personales",
+        "pp_promedio",
+        "mayor_pp_promedio",
+        "menor_pp_promedio",
+    }
+    if intencion_catalogo in intenciones_pp or any(
+        x in pregunta_norm
+        for x in ["MONTO PP", "PP PROMEDIO", "PROMEDIO PP", "PRESTAMO PERSONAL"]
+    ):
+        tabla_pp = _agrupar_pp_chatbot_local(
+            df_contexto=df_contexto,
+            nombre_valera=nombre_valera,
+            fecha_sel=fecha_sel,
+            nivel=nivel,
+        )
+        if tabla_pp.empty:
+            return (
+                "No hay información de Monto PP o PP Promedio dentro del corte "
+                "y los filtros activos."
+            )
+
+        if "PROMEDIO" in pregunta_norm or "pp_promedio" in intencion_catalogo:
+            columna_pp = "PP Promedio"
+        elif "PRESTAMO" in pregunta_norm and "PROMEDIO" not in pregunta_norm:
+            columna_pp = "Prestamos Personales"
+        else:
+            columna_pp = "Monto PP"
+
+        nombres_pp = _buscar_entidades_en_pregunta(pregunta, tabla_pp, nivel)
+        if nombres_pp:
+            fila_pp = tabla_pp[
+                tabla_pp[nivel].astype(str).map(_normalizar_entidad_chatbot)
+                == _normalizar_entidad_chatbot(nombres_pp[0])
+            ].iloc[0]
+            valor_pp = float(fila_pp.get(columna_pp, 0))
+            return (
+                f"**{fila_pp[nivel]}**, al corte de dispersión "
+                f"**{fila_pp.get('Corte Dispersión', fecha_sel)}**, registra "
+                f"**{_formatear_variable_ranking_chatbot(columna_pp, valor_pp)}** "
+                f"de **{columna_pp}**."
+            )
+
+        menor_pp = (
+            intencion_catalogo.startswith("menor_")
+            or any(x in pregunta_norm for x in ["MENOR", "MENOS", "BAJO"])
+        )
+        mayor_pp = (
+            intencion_catalogo.startswith("mayor_")
+            or any(x in pregunta_norm for x in ["MAYOR", "MAS", "ALTO"])
+        )
+        if menor_pp or mayor_pp:
+            fila_pp = _fila_chatbot(tabla_pp, columna_pp, mayor=not menor_pp)
+            if fila_pp is not None:
+                valor_pp = float(fila_pp.get(columna_pp, 0))
+                return (
+                    f"La {nivel.lower()} con {'menor' if menor_pp else 'mayor'} "
+                    f"**{columna_pp}** es **{fila_pp[nivel]}**, con "
+                    f"**{_formatear_variable_ranking_chatbot(columna_pp, valor_pp)}**."
+                )
+
+        monto_pp_total = float(tabla_pp["Monto PP"].sum())
+        prestamos_pp_total = float(tabla_pp["Prestamos Personales"].sum())
+        serie_pp_promedio = pd.to_numeric(
+            tabla_pp["PP Promedio"],
+            errors="coerce",
+        )
+        serie_pp_promedio = serie_pp_promedio[
+            serie_pp_promedio.notna() & (serie_pp_promedio != 0)
+        ]
+        pp_promedio_total = (
+            monto_pp_total / prestamos_pp_total
+            if prestamos_pp_total
+            else (
+                float(serie_pp_promedio.mean())
+                if not serie_pp_promedio.empty
+                else 0.0
+            )
+        )
+        totales_pp = {
+            "Monto PP": monto_pp_total,
+            "Prestamos Personales": prestamos_pp_total,
+            "PP Promedio": pp_promedio_total,
+        }
+        return (
+            f"Al corte de dispersión **{tabla_pp['Corte Dispersión'].iloc[0]}**, "
+            f"el alcance actual registra "
+            f"**{_formatear_variable_ranking_chatbot(columna_pp, totales_pp[columna_pp])}** "
+            f"de **{columna_pp}**."
+        )
 
     # Pregunta sobre un elemento concreto.
     if nombres:
